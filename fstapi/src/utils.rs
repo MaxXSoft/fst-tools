@@ -1,20 +1,34 @@
 use crate::{Error, Result};
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::num::NonZeroU32;
 use std::path::Path;
 
 /// Trait for converting [`Path`] into string.
-pub(crate) trait ToStr<'a> {
+pub(crate) trait PathToStr<'a> {
   /// Converts to <code>&[str]</code>.
   fn to_str(&'a self) -> Result<&'a str>;
 }
 
-impl<'a, P> ToStr<'a> for P
+impl<'a, P> PathToStr<'a> for P
 where
   P: AsRef<Path>,
 {
   fn to_str(&'a self) -> Result<&'a str> {
-    self.as_ref().to_str().ok_or(Error::InvalidUtf8Str)
+    self.as_ref().to_str().ok_or(Error::InvalidUtf8Str(None))
+  }
+}
+
+/// Trait for converting raw C string into string.
+pub(crate) trait RawToStr {
+  /// Converts to <code>&[str]</code>.
+  unsafe fn to_str<'a>(self) -> Result<&'a str>;
+}
+
+impl RawToStr for *const i8 {
+  unsafe fn to_str<'a>(self) -> Result<&'a str> {
+    CStr::from_ptr(self)
+      .to_str()
+      .map_err(|e| Error::InvalidUtf8Str(Some(e)))
   }
 }
 
