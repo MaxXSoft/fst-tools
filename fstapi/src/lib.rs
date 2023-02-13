@@ -1,6 +1,7 @@
 mod capi;
 mod consts;
 mod types;
+mod utils;
 
 pub use consts::*;
 pub use types::*;
