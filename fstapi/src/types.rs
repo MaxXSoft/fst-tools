@@ -1,4 +1,4 @@
-use crate::capi;
+use std::num::NonZeroU32;
 
-pub use capi::fstEnumHandle as EnumHandle;
-pub use capi::fstHandle as Handle;
+pub type EnumHandle = NonZeroU32;
+pub type Handle = NonZeroU32;
