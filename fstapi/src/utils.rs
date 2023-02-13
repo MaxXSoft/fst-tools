@@ -1,6 +1,22 @@
 use crate::{Error, Result};
 use std::ffi::CString;
 use std::num::NonZeroU32;
+use std::path::Path;
+
+/// Trait for converting [`Path`] into string.
+pub(crate) trait ToStr<'a> {
+  /// Converts to <code>&[str]</code>.
+  fn to_str(&'a self) -> Result<&'a str>;
+}
+
+impl<'a, P> ToStr<'a> for P
+where
+  P: AsRef<Path>,
+{
+  fn to_str(&'a self) -> Result<&'a str> {
+    self.as_ref().to_str().ok_or(Error::InvalidUtf8Str)
+  }
+}
 
 /// Trait for converting bytes into [`CString`].
 pub(crate) trait IntoCString {
