@@ -2,9 +2,11 @@ mod capi;
 mod consts;
 mod types;
 mod utils;
+mod writer;
 
 pub use consts::*;
 pub use types::*;
+pub use writer::*;
 
 use std::fmt;
 
