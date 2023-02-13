@@ -14,22 +14,23 @@ use std::fmt;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
   /// Invalid UTF-8 string.
-  InvalidUtf8Str,
+  InvalidUtf8Str(Option<std::str::Utf8Error>),
   /// CString conversion error.
   CStringConv(std::ffi::NulError),
-  /// Writer creation error.
-  WriterCreate,
-  /// Null handle.
-  NullHandle,
+  /// Context creation error.
+  ContextCreate,
+  /// Invalid operation.
+  InvalidOperation,
 }
 
 impl fmt::Display for Error {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self {
-      Self::InvalidUtf8Str => write!(f, "invalid UTF-8 string"),
+      Self::InvalidUtf8Str(None) => write!(f, "invalid UTF-8 string"),
+      Self::InvalidUtf8Str(Some(e)) => write!(f, "{e}"),
       Self::CStringConv(e) => write!(f, "CString conversion error, {e}"),
-      Self::WriterCreate => write!(f, "writer creation error"),
-      Self::NullHandle => write!(f, "null handle"),
+      Self::ContextCreate => write!(f, "context creation error"),
+      Self::InvalidOperation => write!(f, "invalid operation"),
     }
   }
 }
