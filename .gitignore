@@ -1,0 +1,10 @@
+# macOS
+*.DS_Store
+
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock
+
+# VS Code
+.vscode
