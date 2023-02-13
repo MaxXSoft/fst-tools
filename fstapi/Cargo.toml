@@ -9,3 +9,4 @@ description = "API for Fast Signal Trace format files."
 
 [build-dependencies]
 bindgen = "0.64.0"
+cc = { version = "1.0.79", features = ["parallel"] }
