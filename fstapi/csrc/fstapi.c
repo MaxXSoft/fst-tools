@@ -2913,7 +2913,7 @@ if(xc && handle)
 /*
  * value and time change emission
  */
-void fstWriterEmitValueChange(void *ctx, fstHandle handle, const void *val)
+int fstWriterEmitValueChange(void *ctx, fstHandle handle, const void *val)
 {
 struct fstWriterContext *xc = (struct fstWriterContext *)ctx;
 const unsigned char *buf = (const unsigned char *)val;
@@ -2963,7 +2963,7 @@ if(FST_LIKELY((xc) && (handle <= xc->maxhandle)))
                                         memcpy(old_value, buf, len); /* overlay new value */
 
                                         memcpy(xc->curval_mem + offs, buf, len);
-                                        return;
+                                        return 0;
                                         }
                                 else
                                         {
@@ -2977,11 +2977,11 @@ if(FST_LIKELY((xc) && (handle <= xc->maxhandle)))
                                                                 if(buf[i]!='x') break;
                                                                 }
 
-                                                        if(i<len) return;
+                                                        if(i<len) return 0;
                                                         }
                                                         else
                                                         {
-                                                        return;
+                                                        return 0;
                                                         }
                                                 }
                                         }
@@ -2997,7 +2997,7 @@ if(FST_LIKELY((xc) && (handle <= xc->maxhandle)))
                                         *old_value = *buf; /* overlay new value */
 
                                         *(xc->curval_mem + offs) = *buf;
-                                        return;
+                                        return 0;
                                         }
                                 else
                                         {
@@ -3005,11 +3005,11 @@ if(FST_LIKELY((xc) && (handle <= xc->maxhandle)))
                                                 {
                                                 if(!xc->curtime)
                                                         {
-                                                        if(*buf != 'x') return;
+                                                        if(*buf != 'x') return 0;
                                                         }
                                                         else
                                                         {
-                                                        return;
+                                                        return 0;
                                                         }
                                                 }
                                         }
@@ -3026,11 +3026,14 @@ if(FST_LIKELY((xc) && (handle <= xc->maxhandle)))
                         offs = vm4ip[0];
                         memcpy(xc->curval_mem + offs, buf, len);
                         }
+                return 0;
                 }
+        xc->vc_emitted = 0;
         }
+return 1;
 }
 
-void fstWriterEmitValueChange32(void *ctx, fstHandle handle,
+int fstWriterEmitValueChange32(void *ctx, fstHandle handle,
                                 uint32_t bits, uint32_t val) {
         char buf[32];
         char *s = buf;
@@ -3039,9 +3042,9 @@ void fstWriterEmitValueChange32(void *ctx, fstHandle handle,
         {
                 *s++ = '0' + ((val >> (bits - i - 1)) & 1);
         }
-        fstWriterEmitValueChange(ctx, handle, buf);
+        return fstWriterEmitValueChange(ctx, handle, buf);
 }
-void fstWriterEmitValueChange64(void *ctx, fstHandle handle,
+int fstWriterEmitValueChange64(void *ctx, fstHandle handle,
                                 uint32_t bits, uint64_t val) {
         char buf[64];
         char *s = buf;
@@ -3050,14 +3053,14 @@ void fstWriterEmitValueChange64(void *ctx, fstHandle handle,
         {
                 *s++ = '0' + ((val >> (bits - i - 1)) & 1);
         }
-        fstWriterEmitValueChange(ctx, handle, buf);
+        return fstWriterEmitValueChange(ctx, handle, buf);
 }
-void fstWriterEmitValueChangeVec32(void *ctx, fstHandle handle,
+int fstWriterEmitValueChangeVec32(void *ctx, fstHandle handle,
                                    uint32_t bits, const uint32_t *val) {
         struct fstWriterContext *xc = (struct fstWriterContext *)ctx;
         if (FST_UNLIKELY(bits <= 32))
         {
-                fstWriterEmitValueChange32(ctx, handle, bits, val[0]);
+                return fstWriterEmitValueChange32(ctx, handle, bits, val[0]);
         }
         else if(FST_LIKELY(xc))
         {
@@ -3098,15 +3101,16 @@ void fstWriterEmitValueChangeVec32(void *ctx, fstHandle handle,
                                 s += 4;
                         }
                 }
-                fstWriterEmitValueChange(ctx, handle, xc->outval_mem);
+                return fstWriterEmitValueChange(ctx, handle, xc->outval_mem);
         }
+        return 1;
 }
-void fstWriterEmitValueChangeVec64(void *ctx, fstHandle handle,
+int fstWriterEmitValueChangeVec64(void *ctx, fstHandle handle,
                                    uint32_t bits, const uint64_t *val) {
         struct fstWriterContext *xc = (struct fstWriterContext *)ctx;
         if (FST_UNLIKELY(bits <= 64))
         {
-                fstWriterEmitValueChange64(ctx, handle, bits, val[0]);
+                return fstWriterEmitValueChange64(ctx, handle, bits, val[0]);
         }
         else if(FST_LIKELY(xc))
         {
@@ -3147,12 +3151,13 @@ void fstWriterEmitValueChangeVec64(void *ctx, fstHandle handle,
                                 s += 4;
                         }
                 }
-                fstWriterEmitValueChange(ctx, handle, xc->outval_mem);
+                return fstWriterEmitValueChange(ctx, handle, xc->outval_mem);
         }
+        return 1;
 }
 
 
-void fstWriterEmitVariableLengthValueChange(void *ctx, fstHandle handle, const void *val, uint32_t len)
+int fstWriterEmitVariableLengthValueChange(void *ctx, fstHandle handle, const void *val, uint32_t len)
 {
 struct fstWriterContext *xc = (struct fstWriterContext *)ctx;
 const unsigned char *buf = (const unsigned char *)val;
@@ -3190,12 +3195,15 @@ if(FST_LIKELY((xc) && (handle <= xc->maxhandle)))
                 xc->vchg_siz += fstWriterUint32WithVarint32AndLength(xc, &vm4ip[2], xc->tchn_idx - vm4ip[3], buf, len); /* do one fwrite op only */
                 vm4ip[3] = xc->tchn_idx;
                 vm4ip[2] = fpos;
+                return 0;
                 }
+        xc->vc_emitted = 0;
         }
+return 1;
 }
 
 
-void fstWriterEmitTimeChange(void *ctx, uint64_t tim)
+int fstWriterEmitTimeChange(void *ctx, uint64_t tim)
 {
 struct fstWriterContext *xc = (struct fstWriterContext *)ctx;
 unsigned int i;
@@ -3206,7 +3214,7 @@ if(xc)
                 {
                 if(xc->size_limit_locked)       /* this resets xc->is_initial_time to one */
                         {
-                        return;
+                        return 1;
                         }
 
                 if(!xc->valpos_mem)
@@ -3246,7 +3254,9 @@ if(xc)
         fstWriterVarint(xc->tchn_handle, tim - xc->curtime);
         xc->tchn_cnt++;
         xc->curtime = tim;
+        return 0;
         }
+return 1;
 }
 
 

@@ -360,17 +360,17 @@ fstHandle       fstWriterCreateVar2(void *ctx, enum fstVarType vt, enum fstVarDi
                         const char *type, enum fstSupplementalVarType svt, enum fstSupplementalDataType sdt);
 void            fstWriterEmitDumpActive(void *ctx, int enable);
 void 		fstWriterEmitEnumTableRef(void *ctx, fstEnumHandle handle);
-void            fstWriterEmitValueChange(void *ctx, fstHandle handle, const void *val);
-void            fstWriterEmitValueChange32(void *ctx, fstHandle handle,
+int             fstWriterEmitValueChange(void *ctx, fstHandle handle, const void *val);
+int             fstWriterEmitValueChange32(void *ctx, fstHandle handle,
                         uint32_t bits, uint32_t val);
-void            fstWriterEmitValueChange64(void *ctx, fstHandle handle,
+int             fstWriterEmitValueChange64(void *ctx, fstHandle handle,
                         uint32_t bits, uint64_t val);
-void            fstWriterEmitValueChangeVec32(void *ctx, fstHandle handle,
+int             fstWriterEmitValueChangeVec32(void *ctx, fstHandle handle,
                         uint32_t bits, const uint32_t *val);
-void            fstWriterEmitValueChangeVec64(void *ctx, fstHandle handle,
+int             fstWriterEmitValueChangeVec64(void *ctx, fstHandle handle,
                         uint32_t bits, const uint64_t *val);
-void            fstWriterEmitVariableLengthValueChange(void *ctx, fstHandle handle, const void *val, uint32_t len);
-void            fstWriterEmitTimeChange(void *ctx, uint64_t tim);
+int             fstWriterEmitVariableLengthValueChange(void *ctx, fstHandle handle, const void *val, uint32_t len);
+int             fstWriterEmitTimeChange(void *ctx, uint64_t tim);
 void            fstWriterFlushContext(void *ctx);
 int             fstWriterGetDumpSizeLimitReached(void *ctx);
 int             fstWriterGetFseekFailed(void *ctx);
