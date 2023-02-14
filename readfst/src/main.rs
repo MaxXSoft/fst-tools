@@ -1,5 +1,5 @@
 use clap::Parser;
-use fstapi::{file_type, Hier, Reader, Result};
+use fstapi::{file_type, Reader, Result};
 use std::collections::HashMap;
 use std::process;
 
@@ -10,7 +10,7 @@ use std::process;
   about,
   help_template(
     r#"
-{before-help}{name} {version}, {author-with-newline}
+{before-help}{name} {version} by {author-with-newline}
 {about-with-newline}
 {usage-heading} {usage}
 
@@ -105,41 +105,22 @@ fn print_metadata(reader: &Reader) -> Result<()> {
 
 fn print_var_names(reader: &mut Reader, no_aliases: bool) -> Result<()> {
   println!("Variables:");
-  let mut scopes = Vec::new();
   let mut vars = HashMap::new();
-  // Iterate over hierarchies.
-  for hier in reader.hiers() {
-    match hier {
-      Hier::Scope(s) => {
-        let name = s.name()?;
-        // Record scope name.
-        match scopes.last() {
-          Some(last) => scopes.push(format!("{last}.{name}")),
-          None => scopes.push(name.to_string()),
-        }
-      }
-      Hier::Upscope => {
-        scopes.pop();
-      }
-      Hier::Var(v) if !no_aliases || !v.is_alias() => {
-        // Get full variable name.
-        let name = v.name()?;
-        let name = match scopes.last() {
-          Some(last) => format!("{last}.{name}"),
-          None => name.to_string(),
-        };
-        // Print variable name.
-        print!("  {name}");
-        if v.is_alias() {
-          print!(" (alias of {})", vars[&v.handle()]);
-        }
-        println!();
-        // Update handle-name map.
-        if !no_aliases && !v.is_alias() {
-          vars.insert(v.handle(), name);
-        }
-      }
-      _ => {}
+  // Iterate over variables.
+  for var in reader.vars() {
+    let (name, var) = var?;
+    if no_aliases && var.is_alias() {
+      continue;
+    }
+    // Print variable name.
+    print!("  {name}");
+    if var.is_alias() {
+      print!(" (alias of {})", vars[&var.handle()]);
+    }
+    println!();
+    // Update handle-name map.
+    if !no_aliases && !var.is_alias() {
+      vars.insert(var.handle(), name);
     }
   }
   Ok(())
