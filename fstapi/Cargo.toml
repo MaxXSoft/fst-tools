@@ -3,7 +3,13 @@ name = "fstapi"
 version = "0.0.1"
 authors = ["MaxXing <x@MaxXSoft.net>"]
 edition = "2021"
-description = "API for Fast Signal Trace format files."
+description = "API for manipulating Fast Signal Trace (FST) format waveforms."
+repository = "https://github.com/MaxXSoft/fst-tools"
+documentation = "https://docs.rs/fstapi"
+categories = ["api-bindings"]
+keywords = ["fst", "vcd", "waveforms", "signal"]
+readme = "README.md"
+license = "MIT OR Apache-2.0"
 
 [build-dependencies]
 bindgen = "0.64.0"
