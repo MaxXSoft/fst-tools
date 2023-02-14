@@ -145,31 +145,43 @@ impl Writer {
   }
 
   /// Emits value change for the given handle.
-  pub fn emit_value_change(&mut self, handle: Handle, value: &[u8]) {
-    unsafe {
+  pub fn emit_value_change(&mut self, handle: Handle, value: &[u8]) -> Result<()> {
+    let ret = unsafe {
       capi::fstWriterEmitValueChange(
         self.ctx,
         handle.into(),
         value.as_ptr() as *const raw::c_void,
+        value.len() as u32,
       )
+    };
+    match ret {
+      0 => Ok(()),
+      _ => Err(Error::InvalidOperation),
     }
   }
 
   /// Emits vairable-length value change for the given handle.
-  pub fn emit_var_len_value_change(&mut self, handle: Handle, value: &[u8]) {
-    unsafe {
+  pub fn emit_var_len_value_change(&mut self, handle: Handle, value: &[u8]) -> Result<()> {
+    let ret = unsafe {
       capi::fstWriterEmitVariableLengthValueChange(
         self.ctx,
         handle.into(),
         value.as_ptr() as *const raw::c_void,
         value.len() as u32,
       )
+    };
+    match ret {
+      0 => Ok(()),
+      _ => Err(Error::InvalidOperation),
     }
   }
 
   /// Emits time change.
-  pub fn emit_time_change(&mut self, time: u64) {
-    unsafe { capi::fstWriterEmitTimeChange(self.ctx, time) }
+  pub fn emit_time_change(&mut self, time: u64) -> Result<()> {
+    match unsafe { capi::fstWriterEmitTimeChange(self.ctx, time) } {
+      0 => Ok(()),
+      _ => Err(Error::InvalidOperation),
+    }
   }
 
   /// Flushes the content of the current writer to file.
