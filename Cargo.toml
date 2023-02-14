@@ -2,6 +2,7 @@
 members = [
   "fstapi",
   "readfst",
+  "findfst",
 ]
 
 [profile.release]

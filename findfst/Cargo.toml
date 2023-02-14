@@ -1,0 +1,12 @@
+[package]
+name = "findfst"
+version = "0.0.1"
+authors = ["MaxXing <x@MaxXSoft.net>"]
+edition = "2021"
+description = "Find the values of signals from FST waveform."
+repository = "https://github.com/MaxXSoft/fst-tools"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+clap = { version = "4.1.4", features = ["derive"] }
+fstapi = { path = "../fstapi" }
