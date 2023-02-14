@@ -17,6 +17,8 @@ use std::fmt;
 pub enum Error {
   /// Invalid UTF-8 string.
   InvalidUtf8Str(Option<std::str::Utf8Error>),
+  /// CStr conversion error.
+  CStrConv(std::ffi::FromBytesWithNulError),
   /// CString conversion error.
   CStringConv(std::ffi::NulError),
   /// Context creation error.
@@ -30,6 +32,7 @@ impl fmt::Display for Error {
     match self {
       Self::InvalidUtf8Str(None) => write!(f, "invalid UTF-8 string"),
       Self::InvalidUtf8Str(Some(e)) => write!(f, "{e}"),
+      Self::CStrConv(e) => write!(f, "CStr conversion error, {e}"),
       Self::CStringConv(e) => write!(f, "CString conversion error, {e}"),
       Self::ContextCreate => write!(f, "context creation error"),
       Self::InvalidOperation => write!(f, "invalid operation"),
