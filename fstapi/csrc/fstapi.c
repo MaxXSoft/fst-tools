@@ -5002,7 +5002,7 @@ if(xc)
 
 /* normal read which re-interleaves the value change data */
 int fstReaderIterBlocks(void *ctx,
-        void (*value_change_callback)(void *user_callback_data_pointer, uint64_t time, fstHandle facidx, const unsigned char *value),
+        void (*value_change_callback)(void *user_callback_data_pointer, uint64_t time, fstHandle facidx, const unsigned char *value, uint32_t len),
         void *user_callback_data_pointer, FILE *fv)
 {
 return(fstReaderIterBlocks2(ctx, value_change_callback, NULL, user_callback_data_pointer, fv));
@@ -5010,7 +5010,7 @@ return(fstReaderIterBlocks2(ctx, value_change_callback, NULL, user_callback_data
 
 
 int fstReaderIterBlocks2(void *ctx,
-        void (*value_change_callback)(void *user_callback_data_pointer, uint64_t time, fstHandle facidx, const unsigned char *value),
+        void (*value_change_callback)(void *user_callback_data_pointer, uint64_t time, fstHandle facidx, const unsigned char *value, uint32_t len),
         void (*value_change_callback_varlen)(void *user_callback_data_pointer, uint64_t time, fstHandle facidx, const unsigned char *value, uint32_t len),
         void *user_callback_data_pointer, FILE *fv)
 {
@@ -5252,7 +5252,7 @@ for(;;)
                                                                 {
                                                                 xc->temp_signal_value_buf[0] = val;
                                                                 xc->temp_signal_value_buf[1] = 0;
-                                                                value_change_callback(user_callback_data_pointer, beg_tim, idx+1, xc->temp_signal_value_buf);
+                                                                value_change_callback(user_callback_data_pointer, beg_tim, idx+1, xc->temp_signal_value_buf, 1);
                                                                 }
                                                                 else
                                                                 {
@@ -5280,7 +5280,7 @@ for(;;)
                                                                 {
                                                                 memcpy(xc->temp_signal_value_buf, mu+sig_offs, xc->signal_lens[idx]);
                                                                 xc->temp_signal_value_buf[xc->signal_lens[idx]] = 0;
-                                                                value_change_callback(user_callback_data_pointer, beg_tim, idx+1, xc->temp_signal_value_buf);
+                                                                value_change_callback(user_callback_data_pointer, beg_tim, idx+1, xc->temp_signal_value_buf, xc->signal_lens[idx]);
                                                                 }
                                                                 else
                                                                 {
@@ -5323,7 +5323,7 @@ for(;;)
                                                                                         clone_d[j] = srcdata[7-j];
                                                                                         }
                                                                                 }
-                                                                        value_change_callback(user_callback_data_pointer, beg_tim, idx+1, clone_d);
+                                                                        value_change_callback(user_callback_data_pointer, beg_tim, idx+1, clone_d, 8);
                                                                         }
                                                                         else
                                                                         {
@@ -5341,8 +5341,8 @@ for(;;)
                                                                                         clone_d[j] = srcdata[7-j];
                                                                                         }
                                                                                 }
-                                                                        sprintf((char *)xc->temp_signal_value_buf, "%.16g", d);
-                                                                        value_change_callback(user_callback_data_pointer, beg_tim, idx+1, xc->temp_signal_value_buf);
+                                                                        int len = sprintf((char *)xc->temp_signal_value_buf, "%.16g", d);
+                                                                        value_change_callback(user_callback_data_pointer, beg_tim, idx+1, xc->temp_signal_value_buf, len);
                                                                         }
                                                                 }
                                                                 else
@@ -5676,7 +5676,7 @@ for(;;)
                                                 {
                                                 xc->temp_signal_value_buf[0] = val;
                                                 xc->temp_signal_value_buf[1] = 0;
-                                                value_change_callback(user_callback_data_pointer, time_table[i], idx+1, xc->temp_signal_value_buf);
+                                                value_change_callback(user_callback_data_pointer, time_table[i], idx+1, xc->temp_signal_value_buf, 1);
                                                 }
                                                 else
                                                 {
@@ -5795,7 +5795,7 @@ for(;;)
 
                                                 if(value_change_callback)
                                                         {
-                                                        value_change_callback(user_callback_data_pointer, time_table[i], idx+1, xc->temp_signal_value_buf);
+                                                        value_change_callback(user_callback_data_pointer, time_table[i], idx+1, xc->temp_signal_value_buf, j);
                                                         }
                                                         else
                                                         {
@@ -5815,7 +5815,7 @@ for(;;)
                                                         {
                                                         memcpy(xc->temp_signal_value_buf, vdata, len);
                                                         xc->temp_signal_value_buf[len] = 0;
-                                                        value_change_callback(user_callback_data_pointer, time_table[i], idx+1, xc->temp_signal_value_buf);
+                                                        value_change_callback(user_callback_data_pointer, time_table[i], idx+1, xc->temp_signal_value_buf, len);
                                                         }
                                                         else
                                                         {
@@ -5875,7 +5875,7 @@ for(;;)
                                                                         clone_d[j] = srcdata[7-j];
                                                                         }
                                                                 }
-                                                        value_change_callback(user_callback_data_pointer, time_table[i], idx+1, clone_d);
+                                                        value_change_callback(user_callback_data_pointer, time_table[i], idx+1, clone_d, 8);
                                                         }
                                                         else
                                                         {
@@ -5893,8 +5893,8 @@ for(;;)
                                                                         clone_d[j] = srcdata[7-j];
                                                                         }
                                                                 }
-                                                        sprintf((char *)xc->temp_signal_value_buf, "%.16g", d);
-                                                        value_change_callback(user_callback_data_pointer, time_table[i], idx+1, xc->temp_signal_value_buf);
+                                                        int len = sprintf((char *)xc->temp_signal_value_buf, "%.16g", d);
+                                                        value_change_callback(user_callback_data_pointer, time_table[i], idx+1, xc->temp_signal_value_buf, len);
                                                         }
                                                 }
                                                 else

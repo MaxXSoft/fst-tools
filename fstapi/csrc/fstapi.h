@@ -429,10 +429,10 @@ const char *    fstReaderGetVersionString(void *ctx);
 struct fstHier *fstReaderIterateHier(void *ctx);
 int             fstReaderIterateHierRewind(void *ctx);
 int             fstReaderIterBlocks(void *ctx,
-                        void (*value_change_callback)(void *user_callback_data_pointer, uint64_t time, fstHandle facidx, const unsigned char *value),
+                        void (*value_change_callback)(void *user_callback_data_pointer, uint64_t time, fstHandle facidx, const unsigned char *value, uint32_t len),
                         void *user_callback_data_pointer, FILE *vcdhandle);
 int             fstReaderIterBlocks2(void *ctx,
-                        void (*value_change_callback)(void *user_callback_data_pointer, uint64_t time, fstHandle facidx, const unsigned char *value),
+                        void (*value_change_callback)(void *user_callback_data_pointer, uint64_t time, fstHandle facidx, const unsigned char *value, uint32_t len),
                         void (*value_change_callback_varlen)(void *user_callback_data_pointer, uint64_t time, fstHandle facidx, const unsigned char *value, uint32_t len),
                         void *user_callback_data_pointer, FILE *vcdhandle);
 void            fstReaderIterBlocksSetNativeDoublesOnCallback(void *ctx, int enable);
