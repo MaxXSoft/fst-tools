@@ -16,6 +16,7 @@ macro_rules! def_handle_type {
     }
 
     impl From<$name> for u32 {
+      /// Creates a non-zero unsigned integer from the handle.
       fn from(value: $name) -> Self {
         value.0.into()
       }
