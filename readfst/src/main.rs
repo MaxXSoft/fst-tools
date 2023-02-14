@@ -63,13 +63,17 @@ fn try_main() -> Result<()> {
   let mut reader = Reader::open(cli.file)?;
 
   // Print metadata.
+  let mut first = true;
   if cli.metadata {
     print_metadata(&reader)?;
+    first = false;
   }
 
   // Print variable names.
   if cli.var_names {
-    println!();
+    if !first {
+      println!();
+    }
     print_var_names(&mut reader, cli.no_aliases)?;
   }
   Ok(())
