@@ -155,6 +155,15 @@ impl Reader {
     }
   }
 
+  /// Returns an iterator over the variables of the waveform.
+  pub fn vars(&mut self) -> Vars {
+    unsafe { capi::fstReaderIterateHierRewind(self.ctx) };
+    Vars {
+      hiers: self.hiers(),
+      scopes: Vec::new(),
+    }
+  }
+
   /// Runs the given callbacks on each block of the waveform.
   ///
   /// The first callback will be called when value changes, the second callback
@@ -246,6 +255,7 @@ impl<'a> Iterator for Hiers<'a> {
 }
 
 /// Hierarchy of FST waveform.
+#[derive(Debug)]
 pub enum Hier<'a> {
   Scope(Scope<'a>),
   Upscope,
@@ -269,6 +279,7 @@ impl<'a> Hier<'a> {
 }
 
 /// A scope in FST hierarchy.
+#[derive(Debug)]
 pub struct Scope<'a>(&'a capi::fstHier__bindgen_ty_1_fstHierScope);
 
 impl<'a> Scope<'a> {
@@ -299,6 +310,7 @@ impl<'a> Scope<'a> {
 }
 
 /// A variable in FST hierarchy.
+#[derive(Debug)]
 pub struct Var<'a>(&'a capi::fstHier__bindgen_ty_1_fstHierVar);
 
 impl<'a> Var<'a> {
@@ -339,6 +351,7 @@ impl<'a> Var<'a> {
 }
 
 /// An attribute in FST hierarchy.
+#[derive(Debug)]
 pub struct Attr<'a>(&'a capi::fstHier__bindgen_ty_1_fstHierAttr);
 
 impl<'a> Attr<'a> {
@@ -384,5 +397,56 @@ impl<'a> Attr<'a> {
   /// [`misc_type::SOURCEISTEM`](crate::consts::misc_type::SOURCEISTEM).
   pub fn arg_from_name(&self) -> u64 {
     self.0.arg_from_name
+  }
+}
+
+/// An iterator over the variables of a FST waveform.
+///
+/// This struct is created by the [`vars`](Reader::vars)
+/// method on [`Reader`].
+#[derive(Debug)]
+pub struct Vars<'a> {
+  hiers: Hiers<'a>,
+  scopes: Vec<String>,
+}
+
+impl<'a> Iterator for Vars<'a> {
+  type Item = Result<(String, Var<'a>)>;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    macro_rules! unwrap_or_return {
+      ($e:expr) => {
+        match $e {
+          Ok(v) => v,
+          Err(e) => return Some(Err(e)),
+        }
+      };
+    }
+
+    while let Some(hier) = self.hiers.next() {
+      match hier {
+        Hier::Scope(s) => {
+          let name = unwrap_or_return!(s.name());
+          match self.scopes.last() {
+            Some(last) => self.scopes.push(format!("{last}.{name}")),
+            None => self.scopes.push(name.into()),
+          }
+        }
+        Hier::Upscope => {
+          self.scopes.pop();
+        }
+        Hier::Var(v) => {
+          let name = unwrap_or_return!(v.name());
+          let name = match self.scopes.last() {
+            Some(last) => format!("{last}.{name}"),
+            None => name.into(),
+          };
+          return Some(Ok((name, v)));
+        }
+        _ => {}
+      }
+    }
+
+    None
   }
 }
