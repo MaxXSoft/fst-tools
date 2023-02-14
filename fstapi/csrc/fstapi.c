@@ -1954,7 +1954,7 @@ if(xc && !xc->already_in_close && !xc->already_in_flush)
                                 fstWriterEmitTimeChange(xc, 0); /* emit some time change just to have one */
                                 for(dupe_idx = 0; dupe_idx < xc->maxhandle; dupe_idx++) /* now clone the values */
                                         {
-                                        fstWriterEmitValueChange(xc, dupe_idx+1, xc->curval_mem + xc->valpos_mem[4*dupe_idx]);
+                                        fstWriterEmitValueChange(xc, dupe_idx+1, xc->curval_mem + xc->valpos_mem[4*dupe_idx], xc->valpos_mem[4*dupe_idx+1]);
                                         }
                                 }
                         fstWriterFlushContextPrivate(xc);
@@ -2913,7 +2913,7 @@ if(xc && handle)
 /*
  * value and time change emission
  */
-int fstWriterEmitValueChange(void *ctx, fstHandle handle, const void *val)
+int fstWriterEmitValueChange(void *ctx, fstHandle handle, const void *val, uint32_t vlen)
 {
 struct fstWriterContext *xc = (struct fstWriterContext *)ctx;
 const unsigned char *buf = (const unsigned char *)val;
@@ -2935,7 +2935,7 @@ if(FST_LIKELY((xc) && (handle <= xc->maxhandle)))
         vm4ip = &(xc->valpos_mem[4*handle]);
 
         len  = vm4ip[1];
-        if(FST_LIKELY(len)) /* len of zero = variable length, use fstWriterEmitVariableLengthValueChange */
+        if(FST_LIKELY(len && len == vlen)) /* len of zero = variable length, use fstWriterEmitVariableLengthValueChange */
                 {
                 if(FST_LIKELY(!xc->is_initial_time))
                         {
@@ -3042,7 +3042,7 @@ int fstWriterEmitValueChange32(void *ctx, fstHandle handle,
         {
                 *s++ = '0' + ((val >> (bits - i - 1)) & 1);
         }
-        return fstWriterEmitValueChange(ctx, handle, buf);
+        return fstWriterEmitValueChange(ctx, handle, buf, bits);
 }
 int fstWriterEmitValueChange64(void *ctx, fstHandle handle,
                                 uint32_t bits, uint64_t val) {
@@ -3053,7 +3053,7 @@ int fstWriterEmitValueChange64(void *ctx, fstHandle handle,
         {
                 *s++ = '0' + ((val >> (bits - i - 1)) & 1);
         }
-        return fstWriterEmitValueChange(ctx, handle, buf);
+        return fstWriterEmitValueChange(ctx, handle, buf, bits);
 }
 int fstWriterEmitValueChangeVec32(void *ctx, fstHandle handle,
                                    uint32_t bits, const uint32_t *val) {
@@ -3101,7 +3101,7 @@ int fstWriterEmitValueChangeVec32(void *ctx, fstHandle handle,
                                 s += 4;
                         }
                 }
-                return fstWriterEmitValueChange(ctx, handle, xc->outval_mem);
+                return fstWriterEmitValueChange(ctx, handle, xc->outval_mem, bits);
         }
         return 1;
 }
@@ -3151,7 +3151,7 @@ int fstWriterEmitValueChangeVec64(void *ctx, fstHandle handle,
                                 s += 4;
                         }
                 }
-                return fstWriterEmitValueChange(ctx, handle, xc->outval_mem);
+                return fstWriterEmitValueChange(ctx, handle, xc->outval_mem, bits);
         }
         return 1;
 }

@@ -360,7 +360,7 @@ fstHandle       fstWriterCreateVar2(void *ctx, enum fstVarType vt, enum fstVarDi
                         const char *type, enum fstSupplementalVarType svt, enum fstSupplementalDataType sdt);
 void            fstWriterEmitDumpActive(void *ctx, int enable);
 void 		fstWriterEmitEnumTableRef(void *ctx, fstEnumHandle handle);
-int             fstWriterEmitValueChange(void *ctx, fstHandle handle, const void *val);
+int             fstWriterEmitValueChange(void *ctx, fstHandle handle, const void *val, uint32_t vlen);
 int             fstWriterEmitValueChange32(void *ctx, fstHandle handle,
                         uint32_t bits, uint32_t val);
 int             fstWriterEmitValueChange64(void *ctx, fstHandle handle,
