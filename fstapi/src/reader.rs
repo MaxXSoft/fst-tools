@@ -156,14 +156,14 @@ impl Reader {
       time: u64,
       handle: capi::fstHandle,
       value: *const raw::c_uchar,
+      len: u32,
     ) where
       F: FnMut(u64, Handle, &[u8]),
       F2: FnMut(u64, Handle, &[u8]),
     {
       let data: &mut (F, F2) = unsafe { &mut *(data as *mut (F, F2)) };
       let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
-      let len = unsafe { libc::strlen(value as *const raw::c_char) };
-      let value = unsafe { slice::from_raw_parts(value, len) };
+      let value = unsafe { slice::from_raw_parts(value, len as usize) };
       data.0(time, handle, value);
     }
 
