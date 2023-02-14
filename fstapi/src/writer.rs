@@ -42,6 +42,11 @@ impl Writer {
   }
 
   /// Sets date from the given raw C string.
+  ///
+  /// # Safety
+  ///
+  /// The memory pointed to by `date` must contain a valid nul terminator
+  /// at the end of the string.
   pub unsafe fn date_raw(self, date: *const raw::c_char) -> Self {
     capi::fstWriterSetDate(self.ctx, date);
     self
@@ -98,6 +103,11 @@ impl Writer {
   }
 
   /// Sets version from the given raw C string.
+  ///
+  /// # Safety
+  ///
+  /// The memory pointed to by `version` must contain a valid nul terminator
+  /// at the end of the string.
   pub unsafe fn version_raw(self, version: *const raw::c_char) -> Self {
     capi::fstWriterSetVersion(self.ctx, version);
     self

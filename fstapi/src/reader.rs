@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::os::raw;
 use std::path::Path;
-use std::{mem, ptr, slice};
+use std::{ptr, slice};
 
 /// FST waveform reader.
 #[derive(Debug)]
@@ -126,7 +126,7 @@ impl Reader {
   }
 
   /// Returns an iterator over the hierarchies of the waveform.
-  pub fn hiers<'a>(&'a mut self) -> Hiers<'a> {
+  pub fn hiers(&mut self) -> Hiers {
     unsafe { capi::fstReaderIterateHierRewind(self.ctx) };
     Hiers {
       ctx: self.ctx,
@@ -160,7 +160,7 @@ impl Reader {
       F: FnMut(u64, Handle, &[u8]),
       F2: FnMut(u64, Handle, &[u8]),
     {
-      let data: &mut (F, F2) = unsafe { mem::transmute(data) };
+      let data: &mut (F, F2) = unsafe { &mut *(data as *mut (F, F2)) };
       let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
       let len = unsafe { libc::strlen(value as *const raw::c_char) };
       let value = unsafe { slice::from_raw_parts(value, len) };
@@ -177,7 +177,7 @@ impl Reader {
       F: FnMut(u64, Handle, &[u8]),
       F2: FnMut(u64, Handle, &[u8]),
     {
-      let data: &mut (F, F2) = unsafe { mem::transmute(data) };
+      let data: &mut (F, F2) = unsafe { &mut *(data as *mut (F, F2)) };
       let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
       let value = unsafe { slice::from_raw_parts(value, len as usize) };
       data.1(time, handle, value);
@@ -302,7 +302,7 @@ impl<'a> Var<'a> {
   }
 
   /// Returns variable length in bits.
-  pub fn len(&self) -> u32 {
+  pub fn length(&self) -> u32 {
     self.0.length
   }
 
