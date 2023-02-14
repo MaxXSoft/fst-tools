@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "fstapi",
+  "readfst",
 ]
 
 [profile.release]

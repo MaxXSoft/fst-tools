@@ -1,0 +1,9 @@
+[package]
+name = "readfst"
+version = "0.0.1"
+authors = ["MaxXing <x@MaxXSoft.net>"]
+edition = "2021"
+description = "Display information about the contents of FST waveform."
+
+[dependencies]
+fstapi = { path = "../fstapi" }
