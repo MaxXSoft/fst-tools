@@ -6,4 +6,5 @@ edition = "2021"
 description = "Display information about the contents of FST waveform."
 
 [dependencies]
+clap = { version = "4.1.4", features = ["derive"] }
 fstapi = { path = "../fstapi" }
