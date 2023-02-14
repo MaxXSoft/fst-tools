@@ -6,6 +6,7 @@ use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::os::raw;
 use std::path::Path;
+use std::{mem, ptr, slice};
 
 /// FST waveform reader.
 #[derive(Debug)]
@@ -130,6 +131,71 @@ impl Reader {
     Hiers {
       ctx: self.ctx,
       phantom: PhantomData,
+    }
+  }
+
+  /// Runs the given callbacks on each block of the waveform.
+  ///
+  /// The first callback will be called when value changes, the second callback
+  /// will be called when variable-length value changes.
+  ///
+  /// The callback function is defined as:
+  ///
+  /// ```
+  /// fn callback(time: u64, handle: fstapi::Handle, value: &[u8]) {
+  ///   // ...
+  /// }
+  /// ```
+  pub fn for_each_block<F, F2>(&mut self, callback: F, callback_var_len: F2) -> Result<()>
+  where
+    F: FnMut(u64, Handle, &[u8]),
+    F2: FnMut(u64, Handle, &[u8]),
+  {
+    extern "C" fn c_callback<F, F2>(
+      data: *mut raw::c_void,
+      time: u64,
+      handle: capi::fstHandle,
+      value: *const raw::c_uchar,
+    ) where
+      F: FnMut(u64, Handle, &[u8]),
+      F2: FnMut(u64, Handle, &[u8]),
+    {
+      let data: &mut (F, F2) = unsafe { mem::transmute(data) };
+      let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
+      let len = unsafe { libc::strlen(value as *const raw::c_char) };
+      let value = unsafe { slice::from_raw_parts(value, len) };
+      data.0(time, handle, value);
+    }
+
+    extern "C" fn c_callback_var_len<F, F2>(
+      data: *mut raw::c_void,
+      time: u64,
+      handle: capi::fstHandle,
+      value: *const raw::c_uchar,
+      len: u32,
+    ) where
+      F: FnMut(u64, Handle, &[u8]),
+      F2: FnMut(u64, Handle, &[u8]),
+    {
+      let data: &mut (F, F2) = unsafe { mem::transmute(data) };
+      let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
+      let value = unsafe { slice::from_raw_parts(value, len as usize) };
+      data.1(time, handle, value);
+    }
+
+    let mut data = (callback, callback_var_len);
+    let ret = unsafe {
+      capi::fstReaderIterBlocks2(
+        self.ctx,
+        Some(c_callback::<F, F2>),
+        Some(c_callback_var_len::<F, F2>),
+        (&mut data) as *mut _ as *mut raw::c_void,
+        ptr::null_mut(),
+      )
+    };
+    match ret {
+      0 => Err(Error::InvalidOperation),
+      _ => Ok(()),
     }
   }
 }
