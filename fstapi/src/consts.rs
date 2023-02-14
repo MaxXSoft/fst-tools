@@ -115,20 +115,6 @@ pub mod var_dir {
   pub use crate::capi::fstVarDir_FST_VD_OUTPUT as OUTPUT;
 }
 
-pub use crate::capi::fstHierType as HierType;
-
-pub mod hier_type {
-  pub use crate::capi::fstHierType_FST_HT_ATTRBEGIN as ATTRBEGIN;
-  pub use crate::capi::fstHierType_FST_HT_ATTREND as ATTREND;
-  pub use crate::capi::fstHierType_FST_HT_MAX as MAX;
-  pub use crate::capi::fstHierType_FST_HT_MIN as MIN;
-  pub use crate::capi::fstHierType_FST_HT_SCOPE as SCOPE;
-  pub use crate::capi::fstHierType_FST_HT_TREEBEGIN as TREEBEGIN;
-  pub use crate::capi::fstHierType_FST_HT_TREEEND as TREEEND;
-  pub use crate::capi::fstHierType_FST_HT_UPSCOPE as UPSCOPE;
-  pub use crate::capi::fstHierType_FST_HT_VAR as VAR;
-}
-
 pub use crate::capi::fstAttrType as AttrType;
 
 pub mod attr_type {
