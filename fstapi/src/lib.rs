@@ -1,10 +1,12 @@
 mod capi;
 mod consts;
+mod reader;
 mod types;
 mod utils;
 mod writer;
 
 pub use consts::*;
+pub use reader::*;
 pub use types::*;
 pub use writer::*;
 
