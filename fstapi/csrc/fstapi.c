@@ -6633,6 +6633,25 @@ if(xc->signal_lens[facidx] == 1)
 /* return(NULL); */
 }
 
+int fstReaderDumpToVcdFile(void *ctx, const char *path) {
+        FILE *fv;
+        char *fvbuf = NULL;
+        if (path) {
+                fv = fopen(path, "wb");
+                if (!fv) return 1;
+                fvbuf = malloc(2 * 1024 * 1024);
+                if (fvbuf) setvbuf(fv, fvbuf, _IOFBF, 2 * 1024 * 1024);
+        } else {
+                fv = stdout;
+        }
+        int succ = fstReaderProcessHier(ctx, fv) && fstReaderIterBlocks(ctx, NULL, NULL, fv);
+        if (path) {
+                fclose(fv);
+                free(fvbuf);
+        }
+        return succ ? 0 : 1;
+}
+
 
 
 /**********************************************************************/

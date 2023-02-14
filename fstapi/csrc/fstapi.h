@@ -449,6 +449,7 @@ void            fstReaderSetFacProcessMaskAll(void *ctx);
 void            fstReaderSetLimitTimeRange(void *ctx, uint64_t start_time, uint64_t end_time);
 void            fstReaderSetUnlimitedTimeRange(void *ctx);
 void            fstReaderSetVcdExtensions(void *ctx, int enable);
+int             fstReaderDumpToVcdFile(void *ctx, const char *path);
 
 
 /*
