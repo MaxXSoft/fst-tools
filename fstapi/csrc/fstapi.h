@@ -20,6 +20,8 @@
  * DEALINGS IN THE SOFTWARE.
  *
  * SPDX-License-Identifier: MIT
+ *
+ * Modified by MaxXing, 2023-02.
  */
 
 #ifndef FST_API_H
