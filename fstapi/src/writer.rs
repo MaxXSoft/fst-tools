@@ -41,6 +41,12 @@ impl Writer {
     Ok(self)
   }
 
+  /// Sets date from the given raw C string.
+  pub unsafe fn date_raw(self, date: *const raw::c_char) -> Self {
+    capi::fstWriterSetDate(self.ctx, date);
+    self
+  }
+
   /// Sets file type.
   pub fn file_type(self, ty: FileType) -> Self {
     unsafe { capi::fstWriterSetFileType(self.ctx, ty) };
@@ -91,6 +97,12 @@ impl Writer {
     Ok(self)
   }
 
+  /// Sets version from the given raw C string.
+  pub unsafe fn version_raw(self, version: *const raw::c_char) -> Self {
+    capi::fstWriterSetVersion(self.ctx, version);
+    self
+  }
+
   /// Sets attribute begin.
   pub fn set_attr_begin(&mut self, ty: AttrType, sub_ty: i32, name: &str, arg: u64) -> Result<()> {
     let name = name.into_cstring()?;
@@ -129,7 +141,7 @@ impl Writer {
     Handle::new(unsafe {
       capi::fstWriterCreateVar(self.ctx, ty, dir, len, name.as_ptr(), alias.into_handle())
     })
-    .ok_or(Error::NullHandle)
+    .ok_or(Error::InvalidOperation)
   }
 
   /// Emits value change for the given handle.
