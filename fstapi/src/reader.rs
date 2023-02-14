@@ -228,6 +228,24 @@ impl Reader {
       _ => Ok(()),
     }
   }
+
+  /// Dumps the content of waveform as VCD format to the given file
+  /// ([Some(path)]) or the standard output ([None]).
+  pub fn dump_as_vcd<P>(&mut self, path: Option<P>) -> Result<()>
+  where
+    P: AsRef<Path>,
+  {
+    let ret = if let Some(path) = path {
+      let path = path.to_str()?.into_cstring()?;
+      unsafe { capi::fstReaderDumpToVcdFile(self.ctx, path.as_ptr()) }
+    } else {
+      unsafe { capi::fstReaderDumpToVcdFile(self.ctx, ptr::null()) }
+    };
+    match ret {
+      0 => Ok(()),
+      _ => Err(Error::InvalidOperation),
+    }
+  }
 }
 
 impl Drop for Reader {
