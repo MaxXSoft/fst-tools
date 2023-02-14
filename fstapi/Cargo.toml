@@ -5,9 +5,6 @@ authors = ["MaxXing <x@MaxXSoft.net>"]
 edition = "2021"
 description = "API for Fast Signal Trace format files."
 
-[dependencies]
-libc = "0.2.139"
-
 [build-dependencies]
 bindgen = "0.64.0"
 cc = { version = "1.0.79", features = ["parallel"] }
