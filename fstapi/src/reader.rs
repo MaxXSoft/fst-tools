@@ -125,6 +125,11 @@ impl Reader {
     unsafe { capi::fstReaderSetUnlimitedTimeRange(self.ctx) }
   }
 
+  /// Sets whether to use native doubles in callback when iterating over blocks.
+  pub fn set_native_doubles_on_callback(&mut self, enable: bool) {
+    unsafe { capi::fstReaderIterBlocksSetNativeDoublesOnCallback(self.ctx, enable as i32) }
+  }
+
   /// Returns an iterator over the hierarchies of the waveform.
   pub fn hiers(&mut self) -> Hiers {
     unsafe { capi::fstReaderIterateHierRewind(self.ctx) };
