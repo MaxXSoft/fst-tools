@@ -4,6 +4,8 @@ use std::num::NonZeroU32;
 /// Defines a new handle type.
 macro_rules! def_handle_type {
   ($name:ident) => {
+    #[repr(transparent)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct $name(pub(crate) NonZeroU32);
 
     impl $name {
