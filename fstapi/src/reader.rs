@@ -85,6 +85,22 @@ impl Reader {
     unsafe { capi::fstReaderGetTimescale(self.ctx) as i32 }
   }
 
+  /// Returns timescale as string.
+  ///
+  /// Returns [`None`] if the timescale is not valid.
+  pub fn timescale_str(&self) -> Option<&str> {
+    match self.timescale() + 21 {
+      t @ 0..=23 => Some(
+        [
+          "1zs", "10zs", "100zs", "1as", "10as", "100as", "1fs", "10fs", "100fs", "1ps", "10ps",
+          "100ps", "1ns", "10ns", "100ns", "1us", "10us", "100us", "1ms", "10ms", "100ms", "1s",
+          "10s", "100s",
+        ][t as usize],
+      ),
+      _ => None,
+    }
+  }
+
   /// Returns timezero.
   pub fn timezero(&self) -> i64 {
     unsafe { capi::fstReaderGetTimezero(self.ctx) }
