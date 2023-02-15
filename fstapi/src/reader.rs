@@ -362,8 +362,8 @@ impl<'a> Attr<'a> {
   /// [`ArrayType`](crate::consts::ArrayType),
   /// [`EnumValueType`](crate::consts::EnumValueType) or
   /// [`PackType`](crate::consts::PackType).
-  pub fn subtype(&self) -> u8 {
-    self.0.subtype
+  pub fn subtype(&self) -> raw::c_uint {
+    self.0.subtype as raw::c_uint
   }
 
   /// Returns attribute name.
