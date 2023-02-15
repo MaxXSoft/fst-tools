@@ -1,5 +1,6 @@
 use clap::Parser;
-use fstapi::{file_type, Reader, Result};
+use fstapi::{array_type, attr_type, enum_value_type, file_type, misc_type, pack_type};
+use fstapi::{Attr, Hier, Reader, Result};
 use std::collections::HashMap;
 use std::process;
 
@@ -21,7 +22,7 @@ struct Cli {
   /// FST waveform file.
   file: String,
 
-  /// Equivalent to: -m -n.
+  /// Equivalent to: -m -n -A.
   #[arg(short, long)]
   all: bool,
 
@@ -36,6 +37,10 @@ struct Cli {
   /// Do not display aliases when displaying variable names.
   #[arg(long)]
   no_aliases: bool,
+
+  /// Display all attributes.
+  #[arg(short = 'A', long)]
+  attrs: bool,
 }
 
 fn main() {
@@ -51,11 +56,12 @@ fn try_main() -> Result<()> {
   if cli.all {
     cli.metadata = true;
     cli.var_names = true;
+    cli.attrs = true;
   }
 
   // Validate command line arguments.
-  if !cli.metadata && !cli.var_names {
-    eprintln!("Invalid command line arguments, try `-a`.");
+  if !cli.metadata && !cli.var_names && !cli.attrs {
+    eprintln!("Invalid command line arguments, try `-h`.");
     process::exit(1);
   }
 
@@ -73,8 +79,18 @@ fn try_main() -> Result<()> {
   if cli.var_names {
     if !first {
       println!();
+    } else {
+      first = false;
     }
     print_var_names(&mut reader, cli.no_aliases)?;
+  }
+
+  // Print attributes.
+  if cli.attrs {
+    if !first {
+      println!();
+    }
+    print_attrs(&mut reader)?;
   }
   Ok(())
 }
@@ -127,5 +143,93 @@ fn print_var_names(reader: &mut Reader, no_aliases: bool) -> Result<()> {
       vars.insert(var.handle(), name);
     }
   }
+  Ok(())
+}
+
+fn print_attrs(reader: &mut Reader) -> Result<()> {
+  println!("Attributes:");
+  println!("  Num\tType\tSubType\tArg\tArgFromName\tName");
+  let mut printed = 0;
+  for hier in reader.hiers() {
+    if let Hier::AttrBegin(attr) = hier {
+      print!("  {printed}");
+      print_attr(attr)?;
+      printed += 1;
+    }
+  }
+  if printed == 0 {
+    println!("  None");
+  }
+  Ok(())
+}
+
+fn print_attr(attr: Attr) -> Result<()> {
+  print!("\t");
+  match attr.ty() {
+    attr_type::MISC => {
+      print!("Misc\t");
+      match attr.subtype() {
+        misc_type::COMMENT => print!("Comment"),
+        misc_type::ENVVAR => print!("EnvVar"),
+        misc_type::SUPVAR => print!("SupVar"),
+        misc_type::PATHNAME => print!("PathName"),
+        misc_type::SOURCESTEM => print!("SourceStem"),
+        misc_type::SOURCEISTEM => print!("SourceIStem"),
+        misc_type::VALUELIST => print!("ValueList"),
+        misc_type::ENUMTABLE => print!("EnumTable"),
+        misc_type::UNKNOWN => print!("Unknown"),
+        _ => unreachable!(),
+      }
+    }
+    attr_type::ARRAY => {
+      print!("Array\t");
+      match attr.subtype() {
+        array_type::NONE => print!("None"),
+        array_type::UNPACKED => print!("Unpacked"),
+        array_type::PACKED => print!("Packed"),
+        array_type::SPARSE => print!("Sparse"),
+        _ => unreachable!(),
+      }
+    }
+    attr_type::ENUM => {
+      print!("Enum\t");
+      match attr.subtype() {
+        enum_value_type::SV_INTEGER => print!("SvInteger"),
+        enum_value_type::SV_BIT => print!("SvBit"),
+        enum_value_type::SV_LOGIC => print!("SvLogic"),
+        enum_value_type::SV_INT => print!("SvInt"),
+        enum_value_type::SV_SHORTINT => print!("SvShortint"),
+        enum_value_type::SV_LONGINT => print!("SvLongint"),
+        enum_value_type::SV_BYTE => print!("SvByte"),
+        enum_value_type::SV_UNSIGNED_INTEGER => print!("SvUnsignedInteger"),
+        enum_value_type::SV_UNSIGNED_BIT => print!("SvUnsignedBit"),
+        enum_value_type::SV_UNSIGNED_LOGIC => print!("SvUnsignedLogic"),
+        enum_value_type::SV_UNSIGNED_INT => print!("SvUnsignedInt"),
+        enum_value_type::SV_UNSIGNED_SHORTINT => print!("SvUnsignedShortint"),
+        enum_value_type::SV_UNSIGNED_LONGINT => print!("SvUnsignedLongint"),
+        enum_value_type::SV_UNSIGNED_BYTE => print!("SvUnsignedByte"),
+        enum_value_type::REG => print!("Reg"),
+        enum_value_type::TIME => print!("Time"),
+        _ => unreachable!(),
+      }
+    }
+    attr_type::PACK => {
+      print!("Pack\t");
+      match attr.subtype() {
+        pack_type::NONE => print!("None"),
+        pack_type::UNPACKED => print!("Unpacked"),
+        pack_type::PACKED => print!("Packed"),
+        pack_type::TAGGED_PACKED => print!("TaggedPacked"),
+        _ => unreachable!(),
+      }
+    }
+    _ => unreachable!(),
+  }
+  println!(
+    "\t{}\t{}\t{}",
+    attr.arg(),
+    attr.arg_from_name(),
+    attr.name()?
+  );
   Ok(())
 }
