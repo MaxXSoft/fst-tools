@@ -1,4 +1,4 @@
-use crate::consts::{AttrType, FileType, PackType, ScopeType, VarDir, VarType};
+use crate::consts::{AttrType, FileType, ScopeType, VarDir, VarType, WriterPackType};
 use crate::types::Handle;
 use crate::utils::*;
 use crate::{capi, Error, Result};
@@ -59,7 +59,7 @@ impl Writer {
   }
 
   /// Sets pack type.
-  pub fn pack_type(self, ty: PackType) -> Self {
+  pub fn pack_type(self, ty: WriterPackType) -> Self {
     unsafe { capi::fstWriterSetPackType(self.ctx, ty) };
     self
   }
