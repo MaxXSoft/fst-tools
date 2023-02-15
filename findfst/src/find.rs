@@ -122,7 +122,7 @@ fn find_value_mc<M, T, C>(
 ) -> Result<()>
 where
   M: ValueMatcher,
-  C: VarChecker<T> + Clone,
+  C: VarChecker<T>,
 {
   if names_only {
     find_value_mcp(reader, value_matcher, var_checker, NamePrinter)
@@ -136,17 +136,15 @@ where
 fn find_value_mcp<M, T, C, P>(
   reader: &mut Reader,
   value_matcher: M,
-  var_checker: C,
+  mut var_checker: C,
   printer: P,
 ) -> Result<()>
 where
   M: ValueMatcher,
-  C: VarChecker<T> + Clone,
+  C: VarChecker<T>,
   P: Printer,
 {
-  let mut var_checker = var_checker;
-  let mut var_checker2 = var_checker.clone();
-  let callback = |time, handle, value: &[u8]| {
+  reader.for_each_block(|time, handle, value| {
     find_value_callback(
       &value_matcher,
       &mut var_checker,
@@ -155,18 +153,7 @@ where
       handle,
       value,
     )
-  };
-  let callback2 = |time, handle, value: &[u8]| {
-    find_value_callback(
-      &value_matcher,
-      &mut var_checker2,
-      &printer,
-      time,
-      handle,
-      value,
-    )
-  };
-  reader.for_each_block(callback, callback2)
+  })
 }
 
 /// Callback of FST block iterator.
