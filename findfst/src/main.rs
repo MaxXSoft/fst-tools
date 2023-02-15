@@ -1,14 +1,15 @@
 mod checker;
+mod find;
 mod matcher;
 mod printer;
 
 use checker::{DenseChecker, DenseOnceChecker, SparseChecker, SparseOnceChecker};
-use checker::{VarArray, VarChecker, VarMap};
+use checker::{VarChecker, VarInfo};
 use clap::Parser;
+use find::MatchInfo;
 use fstapi::{Handle, Reader, Result};
 use matcher::{ExactMatcher, RegexHexMatcher, RegexMatcher, ValueMatcher};
 use printer::{FullPrinter, NamePrinter, Printer};
-use std::collections::HashMap;
 use std::process;
 
 #[derive(Parser)]
@@ -78,7 +79,7 @@ fn try_main() -> Result<()> {
   let cli = Cli::parse();
 
   // Validate command line arguments.
-  let value_match = ValueMatch::new(cli.value, cli.hex, cli.regex);
+  let match_info = try_or_exit!(MatchInfo::new(cli.value, cli.hex, cli.regex), e, "{e}");
   let signal_re = cli
     .signals
     .map(|s| try_or_exit!(regex::Regex::new(&s), e, "Invalid signal regex: {e}"));
@@ -86,105 +87,47 @@ fn try_main() -> Result<()> {
   // Open the given FST file.
   let mut reader = Reader::open(cli.file)?;
 
-  // Update signal mask and get variable map.
-  let vars = update_signal_mask(&mut reader, signal_re)?;
+  // Get variable information and update signal mask.
+  let vars = VarInfo::new(&mut reader, signal_re)?;
+  match &vars {
+    VarInfo::Map(m) => {
+      reader.clear_mask_all();
+      for handle in m.keys() {
+        reader.set_mask(*handle);
+      }
+    }
+    VarInfo::Array(_) => reader.set_mask_all(),
+  }
 
   // Iterate over blocks and find value.
   find_value(
     &mut reader,
-    value_match,
+    match_info,
     vars,
     cli.all_matches,
     cli.names_only,
   )
 }
 
-enum ValueMatch {
-  Regex(regex::bytes::Regex, bool),
-  Exact(Box<[u8]>),
-}
-
-impl ValueMatch {
-  fn new(value: String, hex: bool, regex: bool) -> Self {
-    if regex {
-      let re = regex::bytes::Regex::new(&value);
-      Self::Regex(try_or_exit!(re, e, "Invalid value regex: {e}"), hex)
-    } else if hex {
-      let mut s = Vec::new();
-      for c in value.chars() {
-        let digit = match c.to_digit(16) {
-          Some(d) => d,
-          _ => eprintln_exit!("Invalid hexadecimal value: {value}!"),
-        };
-        s.push(if (digit & 8) != 0 { b'1' } else { b'0' });
-        s.push(if (digit & 4) != 0 { b'1' } else { b'0' });
-        s.push(if (digit & 2) != 0 { b'1' } else { b'0' });
-        s.push(if (digit & 1) != 0 { b'1' } else { b'0' });
-      }
-      Self::Exact(s.into())
-    } else {
-      if value.contains(|c: char| !c.is_digit(2)) {
-        eprintln_exit!("Invalid binary value: {value}!");
-      }
-      Self::Exact(value.into_bytes().into())
-    }
-  }
-}
-
-enum VarInfo {
-  Map(VarMap),
-  Array(VarArray),
-}
-
-fn update_signal_mask(reader: &mut Reader, re: Option<regex::Regex>) -> Result<VarInfo> {
-  if let Some(re) = re {
-    // Collect matching variables.
-    let mut vars = HashMap::new();
-    for var in reader.vars() {
-      let (name, var) = var?;
-      let handle = var.handle();
-      if re.is_match(&name) && (!var.is_alias() || !vars.contains_key(&handle)) {
-        vars.insert(handle, name);
-      }
-    }
-    // Update mask.
-    reader.clear_mask_all();
-    for handle in vars.keys() {
-      reader.set_mask(*handle);
-    }
-    Ok(VarInfo::Map(vars))
-  } else {
-    // Update mask.
-    reader.set_mask_all();
-    // Collect all variables.
-    Ok(VarInfo::Array(
-      reader
-        .vars()
-        .filter_map(|var| var.map(|(n, v)| (!v.is_alias()).then_some(n)).transpose())
-        .collect::<Result<Box<_>>>()?,
-    ))
-  }
-}
-
 fn find_value(
   reader: &mut Reader,
-  value_match: ValueMatch,
+  value_match: MatchInfo,
   vars: VarInfo,
   all_matches: bool,
   names_only: bool,
 ) -> Result<()> {
   match value_match {
-    ValueMatch::Regex(re, true) => {
+    MatchInfo::Regex(re, true) => {
       find_value_m(reader, RegexMatcher::new(re), vars, all_matches, names_only)
     }
-    ValueMatch::Regex(re, false) => find_value_m(
+    MatchInfo::Regex(re, false) => find_value_m(
       reader,
       RegexHexMatcher::new(re),
       vars,
       all_matches,
       names_only,
     ),
-    ValueMatch::Exact(e) => {
+    MatchInfo::Exact(e) => {
       find_value_m(reader, ExactMatcher::new(e), vars, all_matches, names_only)
     }
   }
