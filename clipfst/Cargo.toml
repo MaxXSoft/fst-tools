@@ -10,3 +10,4 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 clap = { version = "4.1.4", features = ["derive"] }
 fstapi = { path = "../fstapi" }
+regex = "1.7.1"
