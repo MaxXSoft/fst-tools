@@ -13,6 +13,7 @@ For more details, please see:
 ## Available Tools
 
 * [`readfst`](readfst): tool for displaying information about the contents of FST waveform, like `readelf`.
+* [`findfst`](findfst): tool for finding values of signals from FST waveform, like `fstminer` tool that comes with GTKWave but more powerful.
 
 ## Rust Wrapper for FST C API
 
