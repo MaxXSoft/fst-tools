@@ -64,10 +64,10 @@ pub fn find_value(
   names_only: bool,
 ) -> Result<()> {
   match value_match {
-    MatchInfo::Regex(re, true) => {
+    MatchInfo::Regex(re, false) => {
       find_value_m(reader, RegexMatcher::new(re), vars, all_matches, names_only)
     }
-    MatchInfo::Regex(re, false) => find_value_m(
+    MatchInfo::Regex(re, true) => find_value_m(
       reader,
       RegexHexMatcher::new(re),
       vars,
@@ -92,19 +92,19 @@ where
   M: ValueMatcher,
 {
   match (vars, all_matches) {
-    (VarInfo::Map(vars), false) => {
+    (VarInfo::Map(vars), true) => {
       find_value_mc(reader, value_matcher, SparseChecker::new(vars), names_only)
     }
-    (VarInfo::Map(vars), true) => find_value_mc(
+    (VarInfo::Map(vars), false) => find_value_mc(
       reader,
       value_matcher,
       SparseOnceChecker::new(vars),
       names_only,
     ),
-    (VarInfo::Array(vars), false) => {
+    (VarInfo::Array(vars), true) => {
       find_value_mc(reader, value_matcher, DenseChecker::new(vars), names_only)
     }
-    (VarInfo::Array(vars), true) => find_value_mc(
+    (VarInfo::Array(vars), false) => find_value_mc(
       reader,
       value_matcher,
       DenseOnceChecker::new(vars),
