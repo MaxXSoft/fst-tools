@@ -1,4 +1,5 @@
-use fstapi::Handle;
+use fstapi::{Handle, Reader, Result};
+use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 /// Map for stroing handles and their corresponding variable names.
@@ -6,6 +7,37 @@ pub type VarMap = HashMap<Handle, String>;
 
 /// Array for stroing variable names.
 pub type VarArray = Box<[String]>;
+
+/// Information of variable, contains [`VarMap`] and [`VarArray`].
+pub enum VarInfo {
+  Map(VarMap),
+  Array(VarArray),
+}
+
+impl VarInfo {
+  pub fn new(reader: &mut Reader, re: Option<Regex>) -> Result<Self> {
+    if let Some(re) = re {
+      // Collect matching variables.
+      let mut vars = HashMap::new();
+      for var in reader.vars() {
+        let (name, var) = var?;
+        let handle = var.handle();
+        if re.is_match(&name) && (!var.is_alias() || !vars.contains_key(&handle)) {
+          vars.insert(handle, name);
+        }
+      }
+      Ok(Self::Map(vars))
+    } else {
+      // Collect all variables.
+      Ok(Self::Array(
+        reader
+          .vars()
+          .filter_map(|var| var.map(|(n, v)| (!v.is_alias()).then_some(n)).transpose())
+          .collect::<Result<Box<_>>>()?,
+      ))
+    }
+  }
+}
 
 /// Trait for checking variables and getting their names.
 pub trait VarChecker<T> {
