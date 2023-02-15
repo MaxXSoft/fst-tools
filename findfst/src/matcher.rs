@@ -1,4 +1,5 @@
 use regex::bytes::Regex;
+use std::iter;
 
 /// Trait for matching values in different configurations.
 pub trait ValueMatcher {
@@ -62,10 +63,25 @@ impl ExactMatcher {
 
 impl ValueMatcher for ExactMatcher {
   fn is_match(&self, value: &[u8]) -> bool {
-    value
-      .iter()
-      .rev()
-      .zip(self.exact.iter().rev())
-      .all(|(l, r)| l == r)
+    if value.len() > self.exact.len() {
+      value
+        .iter()
+        .rev()
+        .zip(self.exact.iter().rev().chain(iter::repeat(&b'0')))
+        .all(|(l, r)| l == r)
+    } else if value.len() < self.exact.len() {
+      value
+        .iter()
+        .rev()
+        .chain(iter::repeat(&b'0'))
+        .zip(self.exact.iter().rev())
+        .all(|(l, r)| l == r)
+    } else {
+      value
+        .iter()
+        .rev()
+        .zip(self.exact.iter().rev())
+        .all(|(l, r)| l == r)
+    }
   }
 }
