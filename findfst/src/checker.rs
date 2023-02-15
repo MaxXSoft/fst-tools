@@ -47,7 +47,6 @@ pub trait VarChecker<T> {
 }
 
 /// Checks if the given handle is in the variable map.
-#[derive(Clone)]
 pub struct SparseChecker {
   vars: VarMap,
 }
@@ -67,7 +66,6 @@ impl VarChecker<VarMap> for SparseChecker {
 }
 
 /// Checks if the given handle is in the variable array.
-#[derive(Clone)]
 pub struct DenseChecker {
   vars: VarArray,
 }
@@ -98,7 +96,6 @@ pub trait OnceVisitor {
 }
 
 /// Visitor with a sparse set inside.
-#[derive(Clone)]
 pub struct SparseVisitor {
   visited: HashSet<Handle>,
 }
@@ -116,7 +113,6 @@ impl OnceVisitor for SparseVisitor {
 }
 
 /// Visitor with a dense set inside.
-#[derive(Clone)]
 pub struct DenseVisitor {
   visited: Box<[u8]>,
 }
@@ -139,7 +135,6 @@ impl OnceVisitor for DenseVisitor {
 }
 
 /// Checks the given handle for only once.
-#[derive(Clone)]
 pub struct OnceChecker<V, C> {
   visitor: V,
   checker: C,
