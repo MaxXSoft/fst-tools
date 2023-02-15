@@ -164,24 +164,20 @@ impl Reader {
     }
   }
 
-  /// Runs the given callbacks on each block of the waveform.
+  /// Runs the given callback on each block of the waveform.
   ///
-  /// The first callback will be called when value changes, the second callback
-  /// will be called when variable-length value changes.
-  ///
-  /// The callback function is defined as:
+  /// The callback will be called when value changes, and is defined as:
   ///
   /// ```
   /// fn callback(time: u64, handle: fstapi::Handle, value: &[u8]) {
   ///   // ...
   /// }
   /// ```
-  pub fn for_each_block<F, F2>(&mut self, callback: F, callback_var_len: F2) -> Result<()>
+  pub fn for_each_block<F>(&mut self, mut callback: F) -> Result<()>
   where
     F: FnMut(u64, Handle, &[u8]),
-    F2: FnMut(u64, Handle, &[u8]),
   {
-    extern "C" fn c_callback<F, F2>(
+    extern "C" fn c_callback<F>(
       data: *mut raw::c_void,
       time: u64,
       handle: capi::fstHandle,
@@ -189,37 +185,19 @@ impl Reader {
       len: u32,
     ) where
       F: FnMut(u64, Handle, &[u8]),
-      F2: FnMut(u64, Handle, &[u8]),
     {
-      let data: &mut (F, F2) = unsafe { &mut *(data as *mut (F, F2)) };
+      let data: &mut F = unsafe { &mut *(data as *mut F) };
       let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
       let value = unsafe { slice::from_raw_parts(value, len as usize) };
-      data.0(time, handle, value);
+      data(time, handle, value);
     }
 
-    extern "C" fn c_callback_var_len<F, F2>(
-      data: *mut raw::c_void,
-      time: u64,
-      handle: capi::fstHandle,
-      value: *const raw::c_uchar,
-      len: u32,
-    ) where
-      F: FnMut(u64, Handle, &[u8]),
-      F2: FnMut(u64, Handle, &[u8]),
-    {
-      let data: &mut (F, F2) = unsafe { &mut *(data as *mut (F, F2)) };
-      let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
-      let value = unsafe { slice::from_raw_parts(value, len as usize) };
-      data.1(time, handle, value);
-    }
-
-    let mut data = (callback, callback_var_len);
     let ret = unsafe {
       capi::fstReaderIterBlocks2(
         self.ctx,
-        Some(c_callback::<F, F2>),
-        Some(c_callback_var_len::<F, F2>),
-        (&mut data) as *mut _ as *mut raw::c_void,
+        Some(c_callback::<F>),
+        Some(c_callback::<F>),
+        (&mut callback) as *mut _ as *mut raw::c_void,
         ptr::null_mut(),
       )
     };
