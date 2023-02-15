@@ -441,7 +441,7 @@ impl<'a> Iterator for Vars<'a> {
       };
     }
 
-    while let Some(hier) = self.hiers.next() {
+    for hier in self.hiers.by_ref() {
       match hier {
         Hier::Scope(s) => {
           let name = unwrap_or_return!(s.name());
