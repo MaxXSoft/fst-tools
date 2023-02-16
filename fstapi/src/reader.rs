@@ -88,7 +88,7 @@ impl Reader {
   /// Returns timescale as string.
   ///
   /// Returns [`None`] if the timescale is not valid.
-  pub fn timescale_str(&self) -> Option<&str> {
+  pub fn timescale_str(&self) -> Option<&'static str> {
     match self.timescale() + 21 {
       t @ 0..=23 => Some(
         [
