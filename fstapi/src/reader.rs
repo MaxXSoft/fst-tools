@@ -169,13 +169,13 @@ impl Reader {
   /// The callback will be called when value changes, and is defined as:
   ///
   /// ```
-  /// fn callback(time: u64, handle: fstapi::Handle, value: &[u8]) {
+  /// fn callback(time: u64, handle: fstapi::Handle, value: &[u8], var_len: bool) {
   ///   // ...
   /// }
   /// ```
   pub fn for_each_block<F>(&mut self, mut callback: F) -> Result<()>
   where
-    F: FnMut(u64, Handle, &[u8]),
+    F: FnMut(u64, Handle, &[u8], bool),
   {
     extern "C" fn c_callback<F>(
       data: *mut raw::c_void,
@@ -184,19 +184,34 @@ impl Reader {
       value: *const raw::c_uchar,
       len: u32,
     ) where
-      F: FnMut(u64, Handle, &[u8]),
+      F: FnMut(u64, Handle, &[u8], bool),
     {
       let data: &mut F = unsafe { &mut *(data as *mut F) };
       let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
       let value = unsafe { slice::from_raw_parts(value, len as usize) };
-      data(time, handle, value);
+      data(time, handle, value, false);
+    }
+
+    extern "C" fn c_callback_var_len<F>(
+      data: *mut raw::c_void,
+      time: u64,
+      handle: capi::fstHandle,
+      value: *const raw::c_uchar,
+      len: u32,
+    ) where
+      F: FnMut(u64, Handle, &[u8], bool),
+    {
+      let data: &mut F = unsafe { &mut *(data as *mut F) };
+      let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
+      let value = unsafe { slice::from_raw_parts(value, len as usize) };
+      data(time, handle, value, true);
     }
 
     let ret = unsafe {
       capi::fstReaderIterBlocks2(
         self.ctx,
         Some(c_callback::<F>),
-        Some(c_callback::<F>),
+        Some(c_callback_var_len::<F>),
         (&mut callback) as *mut _ as *mut raw::c_void,
         ptr::null_mut(),
       )
