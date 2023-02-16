@@ -1,7 +1,7 @@
 use clap::Parser;
 use fstapi::{
-  array_type, attr_type, enum_value_type, file_type, misc_type, pack_type, var_dir, var_type, Attr,
-  Handle, Hier, Reader, Result, Var,
+  array_type, attr_type, enum_value_type, file_type, misc_type, pack_type, scope_type, var_dir,
+  var_type, Attr, Handle, Hier, Reader, Result, Scope, Var,
 };
 use std::collections::HashMap;
 use std::process;
@@ -40,6 +40,10 @@ struct Cli {
   #[arg(long)]
   no_aliases: bool,
 
+  /// Display all scopes.
+  #[arg(short, long)]
+  scopes: bool,
+
   /// Display all attributes.
   #[arg(short = 'A', long)]
   attrs: bool,
@@ -58,11 +62,12 @@ fn try_main() -> Result<()> {
   if cli.all {
     cli.metadata = true;
     cli.vars = true;
+    cli.scopes = true;
     cli.attrs = true;
   }
 
   // Validate command line arguments.
-  if !cli.metadata && !cli.vars && !cli.attrs {
+  if !cli.metadata && !cli.vars && !cli.scopes && !cli.attrs {
     eprintln!("Invalid command line arguments, try `-h`.");
     process::exit(1);
   }
@@ -77,7 +82,7 @@ fn try_main() -> Result<()> {
     first = false;
   }
 
-  // Print variable names.
+  // Print variables.
   if cli.vars {
     if !first {
       println!();
@@ -85,6 +90,16 @@ fn try_main() -> Result<()> {
       first = false;
     }
     print_vars(&mut reader, cli.no_aliases)?;
+  }
+
+  // Print scopes.
+  if cli.scopes {
+    if !first {
+      println!();
+    } else {
+      first = false;
+    }
+    print_scopes(&mut reader)?;
   }
 
   // Print attributes.
@@ -126,13 +141,19 @@ fn print_metadata(reader: &Reader) -> Result<()> {
 }
 
 fn print_vars(reader: &mut Reader, no_aliases: bool) -> Result<()> {
-  // Print title.
   println!("Variables:");
-  print!("  Handle\tType\tDirection\tBits\tName");
-  if !no_aliases {
-    print!("\tAlias Of");
+  // Check if there are no variables.
+  if reader.var_count() == 0 {
+    println!("  None");
+    return Ok(());
+  } else {
+    // Print title.
+    print!("  Handle\tType\tDirection\tBits\tName");
+    if !no_aliases {
+      print!("\tAlias Of");
+    }
+    println!();
   }
-  println!();
   // Iterate over variables.
   let mut vars = HashMap::new();
   for var in reader.vars() {
@@ -202,13 +223,60 @@ fn print_var(name: &str, var: &Var, vars: &HashMap<Handle, String>) {
   println!();
 }
 
+fn print_scopes(reader: &mut Reader) -> Result<()> {
+  println!("Scopes:");
+  println!("  Num\tType\tComponent\tName");
+  let mut printed = 0;
+  for hier in reader.hiers() {
+    if let Hier::Scope(scope) = hier {
+      print!("  {printed}\t");
+      print_scope(scope)?;
+      printed += 1;
+    }
+  }
+  if printed == 0 {
+    println!("  None");
+  }
+  Ok(())
+}
+
+fn print_scope(scope: Scope) -> Result<()> {
+  match scope.ty() {
+    scope_type::VCD_MODULE => print!("VcdModule"),
+    scope_type::VCD_TASK => print!("VcdTask"),
+    scope_type::VCD_FUNCTION => print!("VcdFunction"),
+    scope_type::VCD_BEGIN => print!("VcdBegin"),
+    scope_type::VCD_FORK => print!("VcdFork"),
+    scope_type::VCD_GENERATE => print!("VcdGenerate"),
+    scope_type::VCD_STRUCT => print!("VcdStruct"),
+    scope_type::VCD_UNION => print!("VcdUnion"),
+    scope_type::VCD_CLASS => print!("VcdClass"),
+    scope_type::VCD_INTERFACE => print!("VcdInterface"),
+    scope_type::VCD_PACKAGE => print!("VcdPackage"),
+    scope_type::VCD_PROGRAM => print!("VcdProgram"),
+    scope_type::VHDL_ARCHITECTURE => print!("VhdlArchitecture"),
+    scope_type::VHDL_PROCEDURE => print!("VhdlProcedure"),
+    scope_type::VHDL_FUNCTION => print!("VhdlFunction"),
+    scope_type::VHDL_RECORD => print!("VhdlRecord"),
+    scope_type::VHDL_PROCESS => print!("VhdlProcess"),
+    scope_type::VHDL_BLOCK => print!("VhdlBlock"),
+    scope_type::VHDL_FOR_GENERATE => print!("VhdlForGenerate"),
+    scope_type::VHDL_IF_GENERATE => print!("VhdlIfGenerate"),
+    scope_type::VHDL_GENERATE => print!("VhdlGenerate"),
+    scope_type::VHDL_PACKAGE => print!("VhdlPackage"),
+    _ => unreachable!(),
+  }
+  println!("\t{}\t{}", scope.component()?, scope.name()?);
+  Ok(())
+}
+
 fn print_attrs(reader: &mut Reader) -> Result<()> {
   println!("Attributes:");
   println!("  Num\tType\tSubType\tArg\tArgFromName\tName");
   let mut printed = 0;
   for hier in reader.hiers() {
     if let Hier::AttrBegin(attr) = hier {
-      print!("  {printed}");
+      print!("  {printed}\t");
       print_attr(attr)?;
       printed += 1;
     }
@@ -220,7 +288,6 @@ fn print_attrs(reader: &mut Reader) -> Result<()> {
 }
 
 fn print_attr(attr: Attr) -> Result<()> {
-  print!("\t");
   match attr.ty() {
     attr_type::MISC => {
       print!("Misc\t");
