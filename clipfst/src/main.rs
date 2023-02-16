@@ -3,7 +3,7 @@ use fstapi::{writer_pack_type, ScopeType, WriterPackType};
 use fstapi::{Error, Handle, Hier, Reader, Result, Scope, Writer};
 use regex::Regex;
 use std::collections::HashMap;
-use std::process;
+use std::{mem, process};
 
 #[derive(Parser)]
 #[command(
@@ -139,6 +139,9 @@ fn try_main() -> Result<()> {
   // update signal masks for reader.
   let handles = build_output_hiers(&mut reader, &mut writer, signal_re, cli.strip_attrs)?;
   if handles.len() < (reader.var_count() - reader.alias_count()) as usize {
+    if handles.is_empty() {
+      eprintln_exit!("No matching signals!");
+    }
     reader.clear_mask_all();
     for handle in handles.keys() {
       reader.set_mask(*handle);
@@ -149,7 +152,23 @@ fn try_main() -> Result<()> {
 
   // Write value change data.
   let mut last_time = start;
+  let mut last_values: HashMap<Handle, Box<[u8]>> = HashMap::new();
   reader.for_each_block(|time, handle, value, var_len| {
+    // Check time range.
+    if time < start {
+      // Record previous value changes.
+      last_values.insert(handle, value.into());
+      return;
+    } else if time > end {
+      return;
+    }
+    // Write previous value changes.
+    if !last_values.is_empty() {
+      for (handle, value) in mem::take(&mut last_values) {
+        let ret = writer.emit_value_change(handles[&handle], &value);
+        try_or_exit!(ret, _, "Failed to write value change!");
+      }
+    }
     // Write time change.
     if time != last_time {
       let ret = writer.emit_time_change(time - start);
