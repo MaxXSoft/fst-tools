@@ -40,6 +40,10 @@ struct Cli {
   #[arg(long)]
   no_aliases: bool,
 
+  /// Only display variable name.
+  #[arg(long)]
+  names_only: bool,
+
   /// Display all scopes.
   #[arg(short, long)]
   scopes: bool,
@@ -89,7 +93,7 @@ fn try_main() -> Result<()> {
     } else {
       first = false;
     }
-    print_vars(&mut reader, cli.no_aliases)?;
+    print_vars(&mut reader, cli.no_aliases, cli.names_only)?;
   }
 
   // Print scopes.
@@ -140,13 +144,15 @@ fn print_metadata(reader: &Reader) -> Result<()> {
   Ok(())
 }
 
-fn print_vars(reader: &mut Reader, no_aliases: bool) -> Result<()> {
-  println!("Variables:");
+fn print_vars(reader: &mut Reader, no_aliases: bool, names_only: bool) -> Result<()> {
+  if !names_only {
+    println!("Variables:");
+  }
   // Check if there are no variables.
   if reader.var_count() == 0 {
     println!("  None");
     return Ok(());
-  } else {
+  } else if !names_only {
     // Print title.
     print!("  Handle\tType\tDirection\tBits\tName");
     if !no_aliases {
@@ -162,10 +168,14 @@ fn print_vars(reader: &mut Reader, no_aliases: bool) -> Result<()> {
       continue;
     }
     // Print variable information.
-    print_var(&name, &var, &vars);
-    // Update handle-name map.
-    if !no_aliases && !var.is_alias() {
-      vars.insert(var.handle(), name);
+    if names_only {
+      println!("{name}");
+    } else {
+      print_var(&name, &var, &vars);
+      // Update handle-name map.
+      if !no_aliases && !var.is_alias() {
+        vars.insert(var.handle(), name);
+      }
     }
   }
   Ok(())
