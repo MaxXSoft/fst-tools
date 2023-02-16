@@ -1,6 +1,8 @@
 use clap::Parser;
-use fstapi::{array_type, attr_type, enum_value_type, file_type, misc_type, pack_type};
-use fstapi::{Attr, Hier, Reader, Result};
+use fstapi::{
+  array_type, attr_type, enum_value_type, file_type, misc_type, pack_type, var_dir, var_type, Attr,
+  Handle, Hier, Reader, Result, Var,
+};
 use std::collections::HashMap;
 use std::process;
 
@@ -22,7 +24,7 @@ struct Cli {
   /// FST waveform file.
   file: String,
 
-  /// Equivalent to: -m -n -A.
+  /// Equivalent to: -m -v -A.
   #[arg(short, long)]
   all: bool,
 
@@ -30,9 +32,9 @@ struct Cli {
   #[arg(short, long)]
   metadata: bool,
 
-  /// Display all variable names.
-  #[arg(short = 'n', long)]
-  var_names: bool,
+  /// Display all variables.
+  #[arg(short, long)]
+  vars: bool,
 
   /// Do not display aliases when displaying variable names.
   #[arg(long)]
@@ -55,12 +57,12 @@ fn try_main() -> Result<()> {
   let mut cli = Cli::parse();
   if cli.all {
     cli.metadata = true;
-    cli.var_names = true;
+    cli.vars = true;
     cli.attrs = true;
   }
 
   // Validate command line arguments.
-  if !cli.metadata && !cli.var_names && !cli.attrs {
+  if !cli.metadata && !cli.vars && !cli.attrs {
     eprintln!("Invalid command line arguments, try `-h`.");
     process::exit(1);
   }
@@ -76,13 +78,13 @@ fn try_main() -> Result<()> {
   }
 
   // Print variable names.
-  if cli.var_names {
+  if cli.vars {
     if !first {
       println!();
     } else {
       first = false;
     }
-    print_var_names(&mut reader, cli.no_aliases)?;
+    print_vars(&mut reader, cli.no_aliases)?;
   }
 
   // Print attributes.
@@ -123,27 +125,81 @@ fn print_metadata(reader: &Reader) -> Result<()> {
   Ok(())
 }
 
-fn print_var_names(reader: &mut Reader, no_aliases: bool) -> Result<()> {
+fn print_vars(reader: &mut Reader, no_aliases: bool) -> Result<()> {
+  // Print title.
   println!("Variables:");
-  let mut vars = HashMap::new();
+  print!("  Handle\tType\tDirection\tBits\tName");
+  if !no_aliases {
+    print!("\tAlias Of");
+  }
+  println!();
   // Iterate over variables.
+  let mut vars = HashMap::new();
   for var in reader.vars() {
     let (name, var) = var?;
     if no_aliases && var.is_alias() {
       continue;
     }
-    // Print variable name.
-    print!("  {name}");
-    if var.is_alias() {
-      print!(" (alias of {})", vars[&var.handle()]);
-    }
-    println!();
+    // Print variable information.
+    print_var(&name, &var, &vars);
     // Update handle-name map.
     if !no_aliases && !var.is_alias() {
       vars.insert(var.handle(), name);
     }
   }
   Ok(())
+}
+
+fn print_var(name: &str, var: &Var, vars: &HashMap<Handle, String>) {
+  print!("  {}\t", var.handle());
+  match var.ty() {
+    var_type::VCD_EVENT => print!("VcdEvent"),
+    var_type::VCD_INTEGER => print!("VcdInteger"),
+    var_type::VCD_PARAMETER => print!("VcdParameter"),
+    var_type::VCD_REAL => print!("VcdReal"),
+    var_type::VCD_REAL_PARAMETER => print!("VcdRealParameter"),
+    var_type::VCD_REG => print!("VcdReg"),
+    var_type::VCD_SUPPLY0 => print!("VcdSupply0"),
+    var_type::VCD_SUPPLY1 => print!("VcdSupply1"),
+    var_type::VCD_TIME => print!("VcdTime"),
+    var_type::VCD_TRI => print!("VcdTri"),
+    var_type::VCD_TRIAND => print!("VcdTriand"),
+    var_type::VCD_TRIOR => print!("VcdTrior"),
+    var_type::VCD_TRIREG => print!("VcdTrireg"),
+    var_type::VCD_TRI0 => print!("VcdTri0"),
+    var_type::VCD_TRI1 => print!("VcdTri1"),
+    var_type::VCD_WAND => print!("VcdWand"),
+    var_type::VCD_WIRE => print!("VcdWire"),
+    var_type::VCD_WOR => print!("VcdWor"),
+    var_type::VCD_PORT => print!("VcdPort"),
+    var_type::VCD_SPARRAY => print!("VcdSparray"),
+    var_type::VCD_REALTIME => print!("VcdRealtime"),
+    var_type::GEN_STRING => print!("GenString"),
+    var_type::SV_BIT => print!("SvBit"),
+    var_type::SV_LOGIC => print!("SvLogic"),
+    var_type::SV_INT => print!("SvInt"),
+    var_type::SV_SHORTINT => print!("SvShortint"),
+    var_type::SV_LONGINT => print!("SvLongint"),
+    var_type::SV_BYTE => print!("SvByte"),
+    var_type::SV_ENUM => print!("SvEnum"),
+    var_type::SV_SHORTREAL => print!("SvShortreal"),
+    _ => unreachable!(),
+  }
+  print!("\t");
+  match var.direction() {
+    var_dir::IMPLICIT => print!("Implicit"),
+    var_dir::INPUT => print!("Input"),
+    var_dir::OUTPUT => print!("Output"),
+    var_dir::INOUT => print!("Inout"),
+    var_dir::BUFFER => print!("Buffer"),
+    var_dir::LINKAGE => print!("Linkage"),
+    _ => unreachable!(),
+  }
+  print!("\t{}\t{name}", var.length());
+  if var.is_alias() {
+    print!("\t{}", vars[&var.handle()]);
+  }
+  println!();
 }
 
 fn print_attrs(reader: &mut Reader) -> Result<()> {
