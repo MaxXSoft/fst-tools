@@ -1,7 +1,7 @@
+mod hiers;
+
 use clap::{Parser, ValueEnum};
-use fstapi::{writer_pack_type, ScopeType, WriterPackType};
-use fstapi::{Error, Handle, Hier, Reader, Result, Scope, Writer};
-use regex::Regex;
+use fstapi::{writer_pack_type, Handle, Reader, Result, Writer, WriterPackType};
 use std::collections::HashMap;
 use std::{mem, process};
 
@@ -135,9 +135,10 @@ fn try_main() -> Result<()> {
     .repack_on_close(cli.repack)
     .parallel_mode(cli.parallel);
 
-  // Build hierarchies for output FST file and
-  // update signal masks for reader.
-  let handles = build_output_hiers(&mut reader, &mut writer, signal_re, cli.strip_attrs)?;
+  // Build hierarchies for output FST file.
+  let handles = hiers::build(&mut reader, &mut writer, signal_re, cli.strip_attrs)?;
+
+  // Update signal masks for reader.
   if handles.len() < (reader.var_count() - reader.alias_count()) as usize {
     if handles.is_empty() {
       eprintln_exit!("No matching signals!");
@@ -204,83 +205,4 @@ fn get_start_end(reader: &Reader, start: Option<u64>, end: Option<u64>) -> (u64,
     eprintln_exit!("Invalid time range: {start}-{end}!");
   }
   (start, end)
-}
-
-struct ScopeStorage {
-  ty: ScopeType,
-  name: String,
-  component: String,
-  visited: bool,
-}
-
-impl TryFrom<Scope<'_>> for ScopeStorage {
-  type Error = Error;
-
-  fn try_from(s: Scope) -> Result<Self> {
-    Ok(Self {
-      ty: s.ty(),
-      name: s.name()?.into(),
-      component: s.component()?.into(),
-      visited: false,
-    })
-  }
-}
-
-fn build_output_hiers(
-  reader: &mut Reader,
-  writer: &mut Writer,
-  re: Option<Regex>,
-  strip_attrs: bool,
-) -> Result<HashMap<Handle, Handle>> {
-  let mut scopes = Vec::new();
-  let mut handles = HashMap::new();
-  // Iterate over hierarchies of the input waveform.
-  for hier in reader.hiers() {
-    match hier {
-      // If need to match signals, just store the scope.
-      Hier::Scope(s) if re.is_some() => scopes.push(ScopeStorage::try_from(s)?),
-      // Otherwise, write the current scope to the output.
-      Hier::Scope(s) => writer.set_scope(s.ty(), s.name()?, s.component()?)?,
-
-      // If no need to match signals, or there is a visited scope storage
-      // (which means there are matching signals in this scope)
-      // write the upscope to the output. Otherwise nothing to do.
-      Hier::Upscope if re.is_none() || matches!(scopes.pop(), Some(s) if s.visited) => {
-        writer.set_upscope()
-      }
-
-      Hier::Var(v) => {
-        let name = v.name()?;
-        // If need to match signals, check if the current signal matches.
-        if let Some(re) = &re {
-          if !re.is_match(name) {
-            continue;
-          }
-          // Visit all unvisited scopes and write them to file.
-          for s in scopes.iter_mut().filter(|s| !s.visited) {
-            s.visited = true;
-            writer.set_scope(s.ty, &s.name, &s.component)?;
-          }
-        }
-        // Write the current variable to the output.
-        let handle = writer.create_var(
-          v.ty(),
-          v.direction(),
-          v.length(),
-          name,
-          handles.get(&v.handle()).copied(),
-        )?;
-        // Update mappings between input handles and output handles.
-        handles.insert(v.handle(), handle);
-      }
-
-      // Write attributes only when `strip_attrs` is `false`.
-      Hier::AttrBegin(a) if !strip_attrs => {
-        writer.set_attr_begin(a.ty(), a.subtype() as i32, a.name()?, a.arg())?
-      }
-      Hier::AttrEnd if !strip_attrs => writer.set_attr_end(),
-      _ => {}
-    }
-  }
-  Ok(handles)
 }
