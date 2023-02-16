@@ -144,7 +144,7 @@ where
   C: VarChecker<T>,
   P: Printer,
 {
-  reader.for_each_block(|time, handle, value| {
+  reader.for_each_block(|time, handle, value, _| {
     find_value_callback(
       &value_matcher,
       &mut var_checker,
