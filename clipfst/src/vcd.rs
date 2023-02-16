@@ -41,7 +41,9 @@ impl VcdWriter {
       } else {
         self.write_value_change(handle, value);
       }
-    })
+    })?;
+    self.write_time_change(self.end_time);
+    Ok(())
   }
 
   fn is_in_time_range(&mut self, time: u64, handle: Handle, value: &[u8]) -> bool {
