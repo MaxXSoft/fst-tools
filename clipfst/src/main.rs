@@ -1,9 +1,9 @@
 mod hiers;
+mod vcd;
 
 use clap::{Parser, ValueEnum};
-use fstapi::{writer_pack_type, Handle, Reader, Result, Writer, WriterPackType};
-use std::collections::HashMap;
-use std::{mem, process};
+use fstapi::{writer_pack_type, Reader, Result, Writer, WriterPackType};
+use vcd::VcdWriter;
 
 #[derive(Parser)]
 #[command(
@@ -85,24 +85,26 @@ impl From<PackType> for WriterPackType {
 macro_rules! eprintln_exit {
   ($($t:tt)*) => {{
     eprintln!($($t)*);
-    process::exit(1)
+    std::process::exit(1)
   }};
 }
+pub(crate) use eprintln_exit;
 
 macro_rules! try_or_exit {
   ($r:expr, $e:ident, $($t:tt)*) => {
     match $r {
       Ok(v) => v,
-      Err($e) => eprintln_exit!($($t)*),
+      Err($e) => $crate::eprintln_exit!($($t)*),
     }
   };
   ($r:expr, _, $($t:tt)*) => {
     match $r {
       Ok(v) => v,
-      Err(_) => eprintln_exit!($($t)*),
+      Err(_) => $crate::eprintln_exit!($($t)*),
     }
   };
 }
+pub(crate) use try_or_exit;
 
 fn main() {
   try_or_exit!(try_main(), e, "Failed to clip the FST waveform: {e}!");
@@ -152,38 +154,7 @@ fn try_main() -> Result<()> {
   }
 
   // Write value change data.
-  let mut last_time = start;
-  let mut last_values: HashMap<Handle, Box<[u8]>> = HashMap::new();
-  reader.for_each_block(|time, handle, value, var_len| {
-    // Check time range.
-    if time < start {
-      // Record previous value changes.
-      last_values.insert(handle, value.into());
-      return;
-    } else if time > end {
-      return;
-    }
-    // Write previous value changes.
-    if !last_values.is_empty() {
-      for (handle, value) in mem::take(&mut last_values) {
-        let ret = writer.emit_value_change(handles[&handle], &value);
-        try_or_exit!(ret, _, "Failed to write value change!");
-      }
-    }
-    // Write time change.
-    if time != last_time {
-      let ret = writer.emit_time_change(time - start);
-      try_or_exit!(ret, _, "Failed to write time change!");
-      last_time = time;
-    }
-    // Write value change.
-    let ret = if var_len {
-      writer.emit_var_len_value_change(handles[&handle], value)
-    } else {
-      writer.emit_value_change(handles[&handle], value)
-    };
-    try_or_exit!(ret, _, "Failed to write value change!");
-  })
+  VcdWriter::new(writer, start, end, handles).write(&mut reader)
 }
 
 fn get_start_end(reader: &Reader, start: Option<u64>, end: Option<u64>) -> (u64, u64) {
