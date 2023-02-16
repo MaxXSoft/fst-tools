@@ -1,4 +1,5 @@
 use crate::utils::IntoCHandle;
+use std::fmt;
 use std::num::NonZeroU32;
 
 /// Handle type, which is actually a 32-bit non-zero unsigned integer.
@@ -17,6 +18,12 @@ impl From<Handle> for u32 {
   /// Creates a non-zero unsigned integer from the handle.
   fn from(value: Handle) -> Self {
     value.0.into()
+  }
+}
+
+impl fmt::Display for Handle {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    self.0.fmt(f)
   }
 }
 
