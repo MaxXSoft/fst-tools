@@ -73,7 +73,7 @@ where
 {
   fn print(&self) {
     let mut table = self.to_table();
-    println!("{}", table.with(Style::modern()));
+    println!("{}", table.with(Style::rounded().off_vertical()));
   }
 }
 
