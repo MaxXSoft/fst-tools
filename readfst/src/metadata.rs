@@ -52,14 +52,14 @@ impl Metadata {
   }
 }
 
-impl Section for Metadata {
+impl Section for &Metadata {
   type Item = Self;
 
-  fn name(&self) -> &str {
+  fn name() -> &'static str {
     "Metadata"
   }
 
-  fn item(&mut self) -> Item<&Self::Item> {
+  fn item(&self) -> Item<Self::Item> {
     Item::One(self)
   }
 }
