@@ -16,7 +16,7 @@ pub struct Reader {
 }
 
 impl Reader {
-  /// Opens a FST waveform from the given path.
+  /// Opens an FST waveform from the given path.
   pub fn open<P>(path: P) -> Result<Self>
   where
     P: AsRef<Path>,
@@ -247,7 +247,7 @@ impl Drop for Reader {
   }
 }
 
-/// An iterator over the hierarchies of a FST waveform.
+/// An iterator over the hierarchies of an FST waveform.
 ///
 /// This struct is created by the [`hiers`](Reader::hiers)
 /// method on [`Reader`].
@@ -268,10 +268,15 @@ impl<'a> Iterator for Hiers<'a> {
 /// Hierarchy of FST waveform.
 #[derive(Debug)]
 pub enum Hier<'a> {
+  /// Begin of a scope.
   Scope(Scope<'a>),
+  /// End of a scope.
   Upscope,
+  /// Variable.
   Var(Var<'a>),
+  /// Begin of an attribute.
   AttrBegin(Attr<'a>),
+  /// End of an attribute.
   AttrEnd,
 }
 
@@ -411,7 +416,7 @@ impl<'a> Attr<'a> {
   }
 }
 
-/// An iterator over the variables of a FST waveform.
+/// An iterator over the variables of an FST waveform.
 ///
 /// This struct is created by the [`vars`](Reader::vars)
 /// method on [`Reader`].
