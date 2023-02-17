@@ -1,4 +1,5 @@
 use regex::bytes::Regex;
+use std::cmp::Ordering;
 use std::iter;
 
 /// Trait for matching values in different configurations.
@@ -63,25 +64,23 @@ impl ExactMatcher {
 
 impl ValueMatcher for ExactMatcher {
   fn is_match(&self, value: &[u8]) -> bool {
-    if value.len() > self.exact.len() {
-      value
+    match value.len().cmp(&self.exact.len()) {
+      Ordering::Greater => value
         .iter()
         .rev()
         .zip(self.exact.iter().rev().chain(iter::repeat(&b'0')))
-        .all(|(l, r)| l == r)
-    } else if value.len() < self.exact.len() {
-      value
+        .all(|(l, r)| l == r),
+      Ordering::Less => value
         .iter()
         .rev()
         .chain(iter::repeat(&b'0'))
         .zip(self.exact.iter().rev())
-        .all(|(l, r)| l == r)
-    } else {
-      value
+        .all(|(l, r)| l == r),
+      Ordering::Equal => value
         .iter()
         .rev()
         .zip(self.exact.iter().rev())
-        .all(|(l, r)| l == r)
+        .all(|(l, r)| l == r),
     }
   }
 }

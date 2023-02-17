@@ -51,10 +51,8 @@ impl VcdWriter {
       // Record previous value changes.
       self.last_values.insert(handle, value.into());
       false
-    } else if time > self.end_time {
-      false
     } else {
-      true
+      time <= self.end_time
     }
   }
 
