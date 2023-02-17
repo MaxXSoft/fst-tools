@@ -52,7 +52,7 @@ impl Metadata {
   }
 }
 
-impl Section for &Metadata {
+impl Section for Metadata {
   type Item = Self;
 
   fn name() -> &'static str {
