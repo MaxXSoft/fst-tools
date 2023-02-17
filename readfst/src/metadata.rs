@@ -15,9 +15,9 @@ pub struct Metadata {
   timescale: &'static str,
   #[tabled(rename = "Timezero")]
   timezero: i64,
-  #[tabled(rename = "Start type")]
+  #[tabled(rename = "Start time")]
   start_time: u64,
-  #[tabled(rename = "End type")]
+  #[tabled(rename = "End time")]
   end_time: u64,
   #[tabled(rename = "Number of scopes")]
   num_scopes: u64,
