@@ -1,5 +1,5 @@
 use tabled::builder::Builder;
-use tabled::object::Rows;
+use tabled::object::FirstRow;
 use tabled::{Alignment, Modify, Panel, Style, Table, Tabled};
 
 /// Item that represents the content of a [`Section`].
@@ -56,7 +56,7 @@ where
     let mut table = self.item().to_table();
     table
       .with(Panel::header(Self::name()))
-      .with(Modify::new(Rows::first()).with(Alignment::center()));
+      .with(Modify::new(FirstRow).with(Alignment::center()));
     table
   }
 }
