@@ -1,13 +1,17 @@
+/// Type of packaging method of writer.
 pub use crate::capi::fstWriterPackType as WriterPackType;
 
+/// Enum values of type [`WriterPackType`](crate::WriterPackType).
 pub mod writer_pack_type {
   pub use crate::capi::fstWriterPackType_FST_WR_PT_FASTLZ as FASTLZ;
   pub use crate::capi::fstWriterPackType_FST_WR_PT_LZ4 as LZ4;
   pub use crate::capi::fstWriterPackType_FST_WR_PT_ZLIB as ZLIB;
 }
 
+/// Type of file.
 pub use crate::capi::fstFileType as FileType;
 
+/// Enum values of type [`FileType`](crate::FileType).
 pub mod file_type {
   pub use crate::capi::fstFileType_FST_FT_MAX as MAX;
   pub use crate::capi::fstFileType_FST_FT_MIN as MIN;
@@ -16,8 +20,10 @@ pub mod file_type {
   pub use crate::capi::fstFileType_FST_FT_VHDL as VHDL;
 }
 
+/// Type of block.
 pub use crate::capi::fstBlockType as BlockType;
 
+/// Enum values of type [`BlockType`](crate::BlockType).
 pub mod block_type {
   pub use crate::capi::fstBlockType_FST_BL_BLACKOUT as BLACKOUT;
   pub use crate::capi::fstBlockType_FST_BL_GEOM as GEOM;
@@ -32,8 +38,10 @@ pub mod block_type {
   pub use crate::capi::fstBlockType_FST_BL_ZWRAPPER as ZWRAPPER;
 }
 
+/// Type of scope.
 pub use crate::capi::fstScopeType as ScopeType;
 
+/// Enum values of type [`ScopeType`](crate::ScopeType).
 pub mod scope_type {
   pub use crate::capi::fstScopeType_FST_ST_GEN_ATTRBEGIN as GEN_ATTRBEGIN;
   pub use crate::capi::fstScopeType_FST_ST_GEN_ATTREND as GEN_ATTREND;
@@ -65,8 +73,10 @@ pub mod scope_type {
   pub use crate::capi::fstScopeType_FST_ST_VHDL_RECORD as VHDL_RECORD;
 }
 
+/// Type of variable.
 pub use crate::capi::fstVarType as VarType;
 
+/// Enum values of type [`VarType`](crate::VarType).
 pub mod var_type {
   pub use crate::capi::fstVarType_FST_VT_GEN_STRING as GEN_STRING;
   pub use crate::capi::fstVarType_FST_VT_MAX as MAX;
@@ -102,8 +112,10 @@ pub mod var_type {
   pub use crate::capi::fstVarType_FST_VT_VCD_WOR as VCD_WOR;
 }
 
+/// Type of variable direction.
 pub use crate::capi::fstVarDir as VarDir;
 
+/// Enum values of type [`VarDir`](crate::VarDir).
 pub mod var_dir {
   pub use crate::capi::fstVarDir_FST_VD_BUFFER as BUFFER;
   pub use crate::capi::fstVarDir_FST_VD_IMPLICIT as IMPLICIT;
@@ -115,8 +127,10 @@ pub mod var_dir {
   pub use crate::capi::fstVarDir_FST_VD_OUTPUT as OUTPUT;
 }
 
+/// Type of attribute.
 pub use crate::capi::fstAttrType as AttrType;
 
+/// Enum values of type [`AttrType`](crate::AttrType).
 pub mod attr_type {
   pub use crate::capi::fstAttrType_FST_AT_ARRAY as ARRAY;
   pub use crate::capi::fstAttrType_FST_AT_ENUM as ENUM;
@@ -126,8 +140,10 @@ pub mod attr_type {
   pub use crate::capi::fstAttrType_FST_AT_PACK as PACK;
 }
 
+/// Subtype of the attribute of type `MISC`.
 pub use crate::capi::fstMiscType as MiscType;
 
+/// Enum values of type [`MiscType`](crate::MiscType).
 pub mod misc_type {
   pub use crate::capi::fstMiscType_FST_MT_COMMENT as COMMENT;
   pub use crate::capi::fstMiscType_FST_MT_ENUMTABLE as ENUMTABLE;
@@ -142,8 +158,10 @@ pub mod misc_type {
   pub use crate::capi::fstMiscType_FST_MT_VALUELIST as VALUELIST;
 }
 
+/// Subtype of the attribute of type `ARRAY`.
 pub use crate::capi::fstArrayType as ArrayType;
 
+/// Enum values of type [`ArrayType`](crate::ArrayType).
 pub mod array_type {
   pub use crate::capi::fstArrayType_FST_AR_MAX as MAX;
   pub use crate::capi::fstArrayType_FST_AR_MIN as MIN;
@@ -153,8 +171,10 @@ pub mod array_type {
   pub use crate::capi::fstArrayType_FST_AR_UNPACKED as UNPACKED;
 }
 
+/// Subtype of the attribute of type `ENUM`.
 pub use crate::capi::fstEnumValueType as EnumValueType;
 
+/// Enum values of type [`EnumValueType`](crate::EnumValueType).
 pub mod enum_value_type {
   pub use crate::capi::fstEnumValueType_FST_EV_MAX as MAX;
   pub use crate::capi::fstEnumValueType_FST_EV_REG as REG;
@@ -175,8 +195,10 @@ pub mod enum_value_type {
   pub use crate::capi::fstEnumValueType_FST_EV_TIME as TIME;
 }
 
+/// Subtype of the attribute of type `PACK`.
 pub use crate::capi::fstPackType as PackType;
 
+/// Enum values of type [`PackType`](crate::PackType).
 pub mod pack_type {
   pub use crate::capi::fstPackType_FST_PT_MAX as MAX;
   pub use crate::capi::fstPackType_FST_PT_NONE as NONE;
@@ -185,8 +207,10 @@ pub mod pack_type {
   pub use crate::capi::fstPackType_FST_PT_UNPACKED as UNPACKED;
 }
 
+/// Type of supplemental variable.
 pub use crate::capi::fstSupplementalVarType as SupplementalVarType;
 
+/// Enum values of type [`SupplementalVarType`](crate::SupplementalVarType).
 pub mod supplemental_var_type {
   pub use crate::capi::fstSupplementalVarType_FST_SVT_MAX as MAX;
   pub use crate::capi::fstSupplementalVarType_FST_SVT_MIN as MIN;
@@ -198,8 +222,10 @@ pub mod supplemental_var_type {
   pub use crate::capi::fstSupplementalVarType_FST_SVT_VHDL_VARIABLE as VHDL_VARIABLE;
 }
 
+/// Type of supplemental data.
 pub use crate::capi::fstSupplementalDataType as SupplementalDataType;
 
+/// Enum values of type [`SupplementalDataType`](crate::SupplementalDataType).
 pub mod supplemental_data_type {
   pub use crate::capi::fstSupplementalDataType_FST_SDT_ABS_MAX as ABS_MAX;
   pub use crate::capi::fstSupplementalDataType_FST_SDT_MAX as MAX;

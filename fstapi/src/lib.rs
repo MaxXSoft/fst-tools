@@ -96,5 +96,5 @@ impl fmt::Display for Error {
   }
 }
 
-/// Result that error type is [`Error`].
+/// Result with error type [`Error`].
 pub type Result<T> = std::result::Result<T, Error>;
