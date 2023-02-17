@@ -2,7 +2,8 @@ use crate::section::{Item, Print, Section, ToTable};
 use fstapi::{var_dir, var_type, Handle, Reader, Result, Var};
 use std::collections::HashMap;
 use std::mem;
-use tabled::{object::LastColumn, Disable, Tabled};
+use tabled::object::{FirstRow, LastColumn};
+use tabled::{Alignment, Disable, Modify, Panel, Tabled};
 
 /// Variable name map.
 type VarNames = HashMap<Handle, Box<str>>;
@@ -86,7 +87,7 @@ pub trait VarSection: Sized {
 /// Variables information.
 pub struct Variables {
   vars: Vec<VarInfo>,
-  names: VarNames,
+  _names: VarNames,
 }
 
 impl Variables {
@@ -111,7 +112,10 @@ impl Variables {
         assert!(names.insert(var.handle(), name.into()).is_none());
       }
     }
-    Ok(Self { vars, names })
+    Ok(Self {
+      vars,
+      _names: names,
+    })
   }
 }
 
@@ -153,7 +157,11 @@ impl VarSection for NoAliasesVars {
 impl ToTable for NoAliasesVars {
   fn to_table(&self) -> tabled::Table {
     let mut table = self.0.to_table();
-    table.with(Disable::column(LastColumn));
+    table
+      .with(Disable::row(FirstRow))
+      .with(Disable::column(LastColumn))
+      .with(Panel::header(Variables::name()))
+      .with(Modify::new(FirstRow).with(Alignment::center()));
     table
   }
 }
