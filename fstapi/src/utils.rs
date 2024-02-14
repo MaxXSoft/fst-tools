@@ -1,5 +1,5 @@
 use crate::{Error, Result};
-use std::ffi::{CStr, CString};
+use std::ffi::{c_char, CStr, CString};
 use std::path::Path;
 use std::slice;
 
@@ -24,7 +24,7 @@ pub(crate) trait RawToStr {
   unsafe fn to_str<'a>(self) -> Result<&'a str>;
 }
 
-impl RawToStr for *const i8 {
+impl RawToStr for *const c_char {
   unsafe fn to_str<'a>(self) -> Result<&'a str> {
     CStr::from_ptr(self)
       .to_str()
@@ -32,7 +32,7 @@ impl RawToStr for *const i8 {
   }
 }
 
-impl RawToStr for (*const i8, u32) {
+impl RawToStr for (*const c_char, u32) {
   unsafe fn to_str<'a>(self) -> Result<&'a str> {
     CStr::from_bytes_with_nul(slice::from_raw_parts(self.0 as *const u8, self.1 as usize))
       .map_err(Error::CStrConv)?
