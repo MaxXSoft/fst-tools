@@ -6,6 +6,7 @@ fn main() {
     .files(["csrc/fastlz.c", "csrc/fstapi.c", "csrc/lz4.c"])
     .define("FST_WRITER_PARALLEL", None)
     .include("csrc")
+    .flag_if_supported("-Wno-unused-but-set-variable")
     .compile("fst");
 
   // Rebuild if C source changes.
