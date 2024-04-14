@@ -37,7 +37,7 @@ where
         builder.set_index(0).transpose();
         builder.build()
       }
-      Item::Many(is) if is.is_empty() => {
+      Item::Many([]) => {
         let mut builder = Builder::default();
         builder.add_record(["None"]);
         builder.build()
