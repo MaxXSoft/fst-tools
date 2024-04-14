@@ -1,6 +1,6 @@
 [package]
 name = "fstapi"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["MaxXing <x@MaxXSoft.net>"]
 edition = "2021"
 description = "API for manipulating Fast Signal Trace (FST) format waveforms."
