@@ -102,7 +102,7 @@ impl Variables {
       // Collect variable information.
       let alias_of = if var.is_alias() {
         // Safe because `vars` do not outlive `names`.
-        unsafe { mem::transmute(names[&var.handle()].as_ref()) }
+        unsafe { mem::transmute::<&str, &str>(names[&var.handle()].as_ref()) }
       } else {
         ""
       };
