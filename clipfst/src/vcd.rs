@@ -37,7 +37,7 @@ impl VcdWriter {
       self.write_time_change(time);
       // Write value change.
       if var_len {
-        self.write_var_len_value_change(handle, value)
+        self.write_var_len_value_change(handle, value);
       } else {
         self.write_value_change(handle, value);
       }
