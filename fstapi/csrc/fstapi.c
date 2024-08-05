@@ -2937,7 +2937,7 @@ if(FST_LIKELY((xc) && (handle <= xc->maxhandle)))
         vm4ip = &(xc->valpos_mem[4*handle]);
 
         len  = vm4ip[1];
-        if(FST_LIKELY(len && (uint32_t)len == vlen)) /* len of zero = variable length, use fstWriterEmitVariableLengthValueChange */
+        if(FST_LIKELY(len && vlen)) /* len of zero = variable length, use fstWriterEmitVariableLengthValueChange */
                 {
                 if(FST_LIKELY(!xc->is_initial_time))
                         {
