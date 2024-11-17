@@ -239,6 +239,41 @@ impl Reader {
       _ => Err(Error::InvalidOperation),
     }
   }
+  /// Gets the value of the variable with the given handle at the specified time.
+  ///
+  /// If the variable is not found, returns `None`.
+  /// If the value is not found, returns `None`.
+  pub fn get_value_from_handle_at_time(&mut self, time: u64, handle: Handle) -> Option<String> {
+    let mut buf = vec![0; 1024]; // Allocate a buffer for the value
+    let result = unsafe {
+      capi::fstReaderGetValueFromHandleAtTime(self.ctx, time, handle.into(), buf.as_mut_ptr())
+    };
+
+    let value_str = unsafe { std::ffi::CStr::from_ptr(result as *const raw::c_char).to_str().ok()? };
+    return Some(value_str.to_owned());
+  }
+
+  /// Finds the next time at which a variable changes after a given time.
+  pub fn get_next_time_change(&mut self, start_time: u64, handle: Handle) -> Result<u64> {
+    let mut time_table = Vec::new();
+    let mut time_table_len = 0;
+    let mut last_time = 0;
+
+    self.for_each_block(|time, current_handle, _val, _| {
+      if time >= start_time && current_handle == handle {
+        time_table.push(time);
+        time_table_len += 1;
+      }
+      last_time = time;
+    })?;
+
+    let next_time = if time_table_len > 0 {
+      time_table[0]
+    } else {
+      last_time
+    };
+    Ok(next_time)
+  }
 }
 
 impl Drop for Reader {
