@@ -38,6 +38,8 @@
 #define unlink _unlink
 #define fileno _fileno
 #define lseek _lseeki64
+#define fseeko _fseeki64
+#define ftello _ftelli64
 
 #ifdef _WIN64
 #define ssize_t __int64

@@ -14,3 +14,6 @@ license = "MIT OR Apache-2.0"
 [build-dependencies]
 bindgen = "0.64.0"
 cc = { version = "1.0.79", features = ["parallel"] }
+
+[target.'cfg(windows)'.build-dependencies]
+vcpkg = "0.2.15"
