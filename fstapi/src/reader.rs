@@ -4,7 +4,7 @@ use crate::utils::*;
 use crate::{capi, Error, Result};
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
-use std::os::raw;
+use std::os::raw::{self, c_int};
 use std::path::Path;
 use std::{ptr, slice};
 
@@ -283,7 +283,7 @@ pub enum Hier<'a> {
 impl<'a> Hier<'a> {
   /// Creates a new hierarchy.
   fn new(hier: &'a capi::fstHier) -> Self {
-    match hier.htyp as u32 {
+    match hier.htyp as c_int  {
       capi::fstHierType_FST_HT_SCOPE => Self::Scope(Scope(unsafe { &hier.u.scope })),
       capi::fstHierType_FST_HT_UPSCOPE => Self::Upscope,
       capi::fstHierType_FST_HT_VAR => Self::Var(Var(unsafe { &hier.u.var })),
@@ -382,6 +382,18 @@ impl<'a> Attr<'a> {
   /// [`ArrayType`](crate::consts::ArrayType),
   /// [`EnumValueType`](crate::consts::EnumValueType) or
   /// [`PackType`](crate::consts::PackType).
+  #[cfg(windows)]
+  pub fn subtype(&self) -> raw::c_int {
+    self.0.subtype as raw::c_int
+  }
+
+  /// Returns attribute subtype.
+  ///
+  /// The subtype may be one of [`MiscType`](crate::consts::MiscType),
+  /// [`ArrayType`](crate::consts::ArrayType),
+  /// [`EnumValueType`](crate::consts::EnumValueType) or
+  /// [`PackType`](crate::consts::PackType).
+  #[cfg(not(windows))]
   pub fn subtype(&self) -> raw::c_uint {
     self.0.subtype as raw::c_uint
   }
