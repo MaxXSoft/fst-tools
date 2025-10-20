@@ -1,7 +1,4 @@
-use std::{env, path::{self, PathBuf}};
-
-#[cfg(windows)]
-use vcpkg;
+use std::{env, path::{PathBuf}};
 
 fn main() {
 
@@ -12,7 +9,7 @@ fn main() {
       .emit_includes(true)
       .find_package("zlib")
       .unwrap();
-    let zlib_include_dir = path::PathBuf::from(zlib.include_paths[0].clone());
+    let zlib_include_dir = zlib.include_paths[0].clone();
 
     vcpkg::Config::new()
       .find_package("pthreads")
@@ -25,8 +22,8 @@ fn main() {
     // vcpkg installs mman under `mman/sys/mman.h` path structure.
     // We need to include the parent `mman` directory so that 
     // fstapi.c can find `sys/mman.h` without modification.
-    let mman_base_path = path::PathBuf::from(mman.include_paths[0].clone());
-    let mman_include_dir = mman_base_path.join(path::PathBuf::from("mman"));
+    let mman_base_path = mman.include_paths[0].clone();
+    let mman_include_dir = mman_base_path.join(PathBuf::from("mman"));
 
     (zlib_include_dir, mman_include_dir)
   };
