@@ -382,20 +382,8 @@ impl<'a> Attr<'a> {
   /// [`ArrayType`](crate::consts::ArrayType),
   /// [`EnumValueType`](crate::consts::EnumValueType) or
   /// [`PackType`](crate::consts::PackType).
-  #[cfg(windows)]
-  pub fn subtype(&self) -> raw::c_int {
-    self.0.subtype as raw::c_int
-  }
-
-  /// Returns attribute subtype.
-  ///
-  /// The subtype may be one of [`MiscType`](crate::consts::MiscType),
-  /// [`ArrayType`](crate::consts::ArrayType),
-  /// [`EnumValueType`](crate::consts::EnumValueType) or
-  /// [`PackType`](crate::consts::PackType).
-  #[cfg(not(windows))]
-  pub fn subtype(&self) -> raw::c_uint {
-    self.0.subtype as raw::c_uint
+  pub fn subtype(&self) -> u32 {
+    self.0.subtype as u32
   }
 
   /// Returns attribute name.

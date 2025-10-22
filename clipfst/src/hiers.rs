@@ -75,7 +75,7 @@ pub fn build(
 
       // Write attributes only when `strip_attrs` is `false`.
       Hier::AttrBegin(a) if !strip_attrs => {
-        writer.set_attr_begin(a.ty(), a.subtype() as i32, a.name()?, a.arg())?
+        writer.set_attr_begin(a.ty(), a.subtype(), a.name()?, a.arg())?
       }
       Hier::AttrEnd if !strip_attrs => writer.set_attr_end(),
       _ => {}

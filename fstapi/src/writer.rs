@@ -114,9 +114,9 @@ impl Writer {
   }
 
   /// Sets attribute begin.
-  pub fn set_attr_begin(&mut self, ty: AttrType, sub_ty: i32, name: &str, arg: u64) -> Result<()> {
+  pub fn set_attr_begin(&mut self, ty: AttrType, sub_ty: u32, name: &str, arg: u64) -> Result<()> {
     let name = name.into_cstring()?;
-    unsafe { capi::fstWriterSetAttrBegin(self.ctx, ty, sub_ty, name.as_ptr(), arg) };
+    unsafe { capi::fstWriterSetAttrBegin(self.ctx, ty, sub_ty as _, name.as_ptr(), arg) };
     Ok(())
   }
 
