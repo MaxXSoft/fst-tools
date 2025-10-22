@@ -1,7 +1,7 @@
 use crate::consts::{AttrType, FileType, ScopeType, VarDir, VarType, WriterPackType};
 use crate::types::Handle;
 use crate::utils::*;
-use crate::{capi, Error, Result};
+use crate::{Error, Result, capi};
 use std::os::raw;
 use std::path::Path;
 
@@ -48,7 +48,7 @@ impl Writer {
   /// The memory pointed to by `date` must contain a valid nul terminator
   /// at the end of the string.
   pub unsafe fn date_raw(self, date: *const raw::c_char) -> Self {
-    capi::fstWriterSetDate(self.ctx, date);
+    unsafe { capi::fstWriterSetDate(self.ctx, date) };
     self
   }
 
@@ -109,7 +109,7 @@ impl Writer {
   /// The memory pointed to by `version` must contain a valid nul terminator
   /// at the end of the string.
   pub unsafe fn version_raw(self, version: *const raw::c_char) -> Self {
-    capi::fstWriterSetVersion(self.ctx, version);
+    unsafe { capi::fstWriterSetVersion(self.ctx, version) };
     self
   }
 

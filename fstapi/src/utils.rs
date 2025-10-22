@@ -1,5 +1,5 @@
 use crate::{Error, Result};
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{CStr, CString, c_char};
 use std::path::Path;
 use std::slice;
 
@@ -26,7 +26,7 @@ pub(crate) trait RawToStr {
 
 impl RawToStr for *const c_char {
   unsafe fn to_str<'a>(self) -> Result<&'a str> {
-    CStr::from_ptr(self)
+    unsafe { CStr::from_ptr(self) }
       .to_str()
       .map_err(|e| Error::InvalidUtf8Str(Some(e)))
   }
@@ -34,7 +34,8 @@ impl RawToStr for *const c_char {
 
 impl RawToStr for (*const c_char, u32) {
   unsafe fn to_str<'a>(self) -> Result<&'a str> {
-    CStr::from_bytes_with_nul(slice::from_raw_parts(self.0 as *const u8, self.1 as usize))
+    let bytes = unsafe { slice::from_raw_parts(self.0 as *const u8, self.1 as usize) };
+    CStr::from_bytes_with_nul(bytes)
       .map_err(Error::CStrConv)?
       .to_str()
       .map_err(|e| Error::InvalidUtf8Str(Some(e)))

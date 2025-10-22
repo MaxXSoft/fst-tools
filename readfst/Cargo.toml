@@ -2,12 +2,12 @@
 name = "readfst"
 version = "0.0.2"
 authors = ["MaxXing <x@MaxXSoft.net>"]
-edition = "2021"
+edition = "2024"
 description = "Display information about the contents of FST waveform."
 repository = "https://github.com/MaxXSoft/fst-tools"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-clap = { version = "4.1.4", features = ["derive"] }
+clap = { version = "4.5.50", features = ["derive"] }
 fstapi = { path = "../fstapi" }
 tabled = "0.10.0"
