@@ -1,6 +1,6 @@
 [package]
 name = "findfst"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["MaxXing <x@MaxXSoft.net>"]
 edition = "2024"
 description = "Find the values of signals from FST waveform."
