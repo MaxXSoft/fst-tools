@@ -147,7 +147,7 @@ impl Reader {
   }
 
   /// Returns an iterator over the hierarchies of the waveform.
-  pub fn hiers(&mut self) -> Hiers {
+  pub fn hiers(&mut self) -> Hiers<'_> {
     unsafe { capi::fstReaderIterateHierRewind(self.ctx) };
     Hiers {
       ctx: self.ctx,
@@ -156,7 +156,7 @@ impl Reader {
   }
 
   /// Returns an iterator over the variables of the waveform.
-  pub fn vars(&mut self) -> Vars {
+  pub fn vars(&mut self) -> Vars<'_> {
     unsafe { capi::fstReaderIterateHierRewind(self.ctx) };
     Vars {
       hiers: self.hiers(),

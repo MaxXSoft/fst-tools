@@ -71,7 +71,7 @@ impl Section for Scopes {
     "Scopes"
   }
 
-  fn item(&self) -> crate::section::Item<Self::Item> {
+  fn item(&self) -> Item<'_, Self::Item> {
     Item::Many(&self.scopes)
   }
 }

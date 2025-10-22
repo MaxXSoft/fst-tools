@@ -120,7 +120,7 @@ pub struct DenseVisitor {
 impl OnceVisitor for DenseVisitor {
   fn new(num_vars: usize) -> Self {
     Self {
-      visited: vec![0; (num_vars + 7) / 8].into(),
+      visited: vec![0; num_vars.div_ceil(8)].into(),
     }
   }
 

@@ -46,7 +46,7 @@ fn main() {
   println!("cargo:rustc-link-lib=z");
 
   // Generate bindings.
-  let mut bindgen_builder = bindgen::Builder::default()
+  let bindgen_builder = bindgen::Builder::default()
     .header("csrc/fstapi.h")
     .allowlist_type(r#"(fst|FST_)\w+"#)
     .allowlist_function(r#"(fst|FST_)\w+"#)
@@ -54,9 +54,7 @@ fn main() {
     .clang_arg("-Icsrc");
 
   #[cfg(windows)]
-  {
-    bindgen_builder = bindgen_builder.clang_arg(format!("-I{}", zlib_include_dir.display()));
-  }
+  let bindgen_builder = bindgen_builder.clang_arg(format!("-I{}", zlib_include_dir.display()));
 
   let bindings = bindgen_builder
     .generate()

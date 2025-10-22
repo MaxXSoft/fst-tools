@@ -17,7 +17,7 @@ pub trait Section {
   fn name() -> &'static str;
 
   /// Returns the item in the current section.
-  fn item(&self) -> Item<Self::Item>;
+  fn item(&self) -> Item<'_, Self::Item>;
 }
 
 /// Trait for converting to [`Table`].

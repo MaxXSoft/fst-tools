@@ -136,7 +136,7 @@ impl Section for Variables {
     "Variables"
   }
 
-  fn item(&self) -> Item<Self::Item> {
+  fn item(&self) -> Item<'_, Self::Item> {
     Item::Many(&self.vars)
   }
 }

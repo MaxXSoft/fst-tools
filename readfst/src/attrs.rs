@@ -114,7 +114,7 @@ impl Section for Attrs {
     "Attributes"
   }
 
-  fn item(&self) -> Item<Self::Item> {
+  fn item(&self) -> Item<'_, Self::Item> {
     Item::Many(&self.attrs)
   }
 }

@@ -59,7 +59,7 @@ impl Section for Metadata {
     "Metadata"
   }
 
-  fn item(&self) -> Item<Self::Item> {
+  fn item(&self) -> Item<'_, Self::Item> {
     Item::One(self)
   }
 }
