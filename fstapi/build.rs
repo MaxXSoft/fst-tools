@@ -1,7 +1,6 @@
-use std::{env, path::{PathBuf}};
+use std::{env, path::PathBuf};
 
 fn main() {
-
   #[cfg(windows)]
   let (zlib_include_dir, mman_include_dir) = {
     // Find zlib via vcpkg.
@@ -11,16 +10,12 @@ fn main() {
       .unwrap();
     let zlib_include_dir = zlib.include_paths[0].clone();
 
-    vcpkg::Config::new()
-      .find_package("pthreads")
-      .unwrap();
+    vcpkg::Config::new().find_package("pthreads").unwrap();
 
-    let mman = vcpkg::Config::new()
-      .find_package("mman")
-      .unwrap();
+    let mman = vcpkg::Config::new().find_package("mman").unwrap();
 
     // vcpkg installs mman under `mman/sys/mman.h` path structure.
-    // We need to include the parent `mman` directory so that 
+    // We need to include the parent `mman` directory so that
     // fstapi.c can find `sys/mman.h` without modification.
     let mman_base_path = mman.include_paths[0].clone();
     let mman_include_dir = mman_base_path.join(PathBuf::from("mman"));
@@ -37,7 +32,9 @@ fn main() {
     .flag_if_supported("-Wno-unused-but-set-variable");
 
   #[cfg(windows)]
-  cc_build.include(&zlib_include_dir).include(&mman_include_dir);
+  cc_build
+    .include(&zlib_include_dir)
+    .include(&mman_include_dir);
 
   cc_build.compile("fst");
 

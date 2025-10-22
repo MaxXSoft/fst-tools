@@ -4,7 +4,7 @@ use crate::utils::*;
 use crate::{capi, Error, Result};
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
-use std::os::raw::{self};
+use std::os::raw;
 use std::path::Path;
 use std::{ptr, slice};
 
@@ -283,7 +283,7 @@ pub enum Hier<'a> {
 impl<'a> Hier<'a> {
   /// Creates a new hierarchy.
   fn new(hier: &'a capi::fstHier) -> Self {
-    match hier.htyp as capi::fstHierType  {
+    match hier.htyp as capi::fstHierType {
       capi::fstHierType_FST_HT_SCOPE => Self::Scope(Scope(unsafe { &hier.u.scope })),
       capi::fstHierType_FST_HT_UPSCOPE => Self::Upscope,
       capi::fstHierType_FST_HT_VAR => Self::Var(Var(unsafe { &hier.u.var })),
