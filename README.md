@@ -36,22 +36,27 @@ Windows requires additional setup due to dependencies that are not readily avail
 1. **Install vcpkg:**
 
    It comes preinstalled with Visual Studio, but if you don't have it yet, you can install it by running the following commands in PowerShell:
+
    ```powershell
    git clone https://github.com/Microsoft/vcpkg.git
    cd vcpkg
    .\bootstrap-vcpkg.bat
    ```
+
    (tested with vcpkg version 2025-02-11-bec4296bf5289dc9ce83b4f5095943e44162f9c2)
 
 2. **Install required packages:**
+
    ```powershell
    vcpkg install zlib:x64-windows-static-md
    vcpkg install pthreads:x64-windows-static-md
    vcpkg install mman:x64-windows-static-md
    ```
+
    (adjust vcpkg path as necessary, depending on whether it is on your PATH or not)
 
 3. **Build**
+
    ```powershell
    cargo build
    ```
@@ -59,17 +64,16 @@ Windows requires additional setup due to dependencies that are not readily avail
 **Note:** The build requires the `x64-windows-static-md` triplet for vcpkg packages to ensure compatibility with Rust's MSVC toolchain.
 
 ### Troubleshooting
+
 ```
   thread 'main' panicked at fstapi\build.rs:19:8:
   called `Result::unwrap()` on an `Err` value: LibNotFound("package zlib is not installed for vcpkg triplet x64-windows-static-md")
   note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 ```
-This error indicates that the `zlib` package is not found for the specified vcpkg triplet. Ensure that you have installed `zlib` using the correct triplet as shown in step 2 above.
-Similarly for pthreads or mman packages.
+
+This error indicates that the `zlib` package is not found for the specified vcpkg triplet. Ensure that you have installed `zlib` using the correct triplet as shown in step 2 above. Similarly for pthreads or mman packages.
 
 Note that we're using pthreads (with an s) instead of pthread (without s) because the latter is deprecated in vcpkg.
-
-
 
 ## Rust Wrapper for FST C API
 
@@ -83,4 +87,4 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-Copyright (C) 2023-2024 MaxXing. Licensed under either of [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option.
+Copyright (C) 2023-2025 MaxXing. Licensed under either of [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option.
