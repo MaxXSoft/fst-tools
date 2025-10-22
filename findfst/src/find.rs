@@ -3,7 +3,7 @@ use crate::checker::{VarChecker, VarInfo};
 use crate::matcher::{ExactMatcher, RegexHexMatcher, RegexMatcher, ValueMatcher};
 use crate::printer::{FullPrinter, NamePrinter, Printer};
 use fstapi::{Handle, Reader, Result};
-use regex::{bytes::Regex, Error as RegexError};
+use regex::{Error as RegexError, bytes::Regex};
 use std::fmt;
 
 /// Errors that can occurr when constructing [`MatchInfo`].

@@ -5,7 +5,7 @@ mod printer;
 
 use checker::VarInfo;
 use clap::Parser;
-use find::{find_value, MatchInfo};
+use find::{MatchInfo, find_value};
 use fstapi::{Reader, Result};
 use std::process;
 

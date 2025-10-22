@@ -94,8 +94,8 @@ pub mod var_type {
   pub use crate::capi::fstVarType_FST_VT_VCD_PARAMETER as VCD_PARAMETER;
   pub use crate::capi::fstVarType_FST_VT_VCD_PORT as VCD_PORT;
   pub use crate::capi::fstVarType_FST_VT_VCD_REAL as VCD_REAL;
-  pub use crate::capi::fstVarType_FST_VT_VCD_REALTIME as VCD_REALTIME;
   pub use crate::capi::fstVarType_FST_VT_VCD_REAL_PARAMETER as VCD_REAL_PARAMETER;
+  pub use crate::capi::fstVarType_FST_VT_VCD_REALTIME as VCD_REALTIME;
   pub use crate::capi::fstVarType_FST_VT_VCD_REG as VCD_REG;
   pub use crate::capi::fstVarType_FST_VT_VCD_SPARRAY as VCD_SPARRAY;
   pub use crate::capi::fstVarType_FST_VT_VCD_SUPPLY0 as VCD_SUPPLY0;

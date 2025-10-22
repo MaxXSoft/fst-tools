@@ -1,7 +1,7 @@
 use crate::consts::{AttrType, FileType, ScopeType, VarDir, VarType};
 use crate::types::Handle;
 use crate::utils::*;
-use crate::{capi, Error, Result};
+use crate::{Error, Result, capi};
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::os::raw;

@@ -1,5 +1,5 @@
 use crate::section::{Item, Section};
-use fstapi::{scope_type, Hier, Reader, Result, Scope};
+use fstapi::{Hier, Reader, Result, Scope, scope_type};
 use tabled::Tabled;
 
 /// Scope information.

@@ -1,5 +1,5 @@
 use crate::section::{Item, Section};
-use fstapi::{file_type, Reader, Result};
+use fstapi::{Reader, Result, file_type};
 use tabled::Tabled;
 
 /// Metadata information.

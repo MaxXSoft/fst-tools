@@ -1,7 +1,7 @@
 use crate::section::{Item, Section};
-use fstapi::{array_type, attr_type, enum_value_type, misc_type, pack_type};
 use fstapi::{ArrayType, EnumValueType, MiscType, PackType};
 use fstapi::{Attr, Hier, Reader, Result};
+use fstapi::{array_type, attr_type, enum_value_type, misc_type, pack_type};
 use tabled::Tabled;
 
 /// Attribute information.

@@ -2,7 +2,7 @@ mod hiers;
 mod vcd;
 
 use clap::{Parser, ValueEnum};
-use fstapi::{writer_pack_type, Reader, Result, Writer, WriterPackType};
+use fstapi::{Reader, Result, Writer, WriterPackType, writer_pack_type};
 use vcd::VcdWriter;
 
 #[derive(Parser)]

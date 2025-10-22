@@ -1,5 +1,5 @@
 use crate::section::{Item, Print, Section, ToTable};
-use fstapi::{var_dir, var_type, Handle, Reader, Result, Var};
+use fstapi::{Handle, Reader, Result, Var, var_dir, var_type};
 use std::collections::HashMap;
 use std::mem;
 use tabled::object::{FirstRow, LastColumn};
