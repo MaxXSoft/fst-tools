@@ -25,6 +25,7 @@ jobs:
         vcpkg install zlib:x64-windows-static-md
         vcpkg install pthreads:x64-windows-static-md
         vcpkg install mman:x64-windows-static-md
+        vcpkg integrate install
 
     - name: Checkout
       uses: actions/checkout@v4
