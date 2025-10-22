@@ -1,5 +1,6 @@
 use crate::section::{Item, Section};
 use fstapi::{array_type, attr_type, enum_value_type, misc_type, pack_type};
+use fstapi::{ArrayType, EnumValueType, MiscType, PackType};
 use fstapi::{Attr, Hier, Reader, Result};
 use tabled::Tabled;
 
@@ -23,7 +24,7 @@ impl AttrInfo {
     let (ty, subtype) = match attr.ty() {
       attr_type::MISC => (
         "Misc",
-        match attr.subtype() {
+        match attr.subtype() as MiscType {
           misc_type::COMMENT => "Comment",
           misc_type::ENVVAR => "EnvVar",
           misc_type::SUPVAR => "SupVar",
@@ -38,7 +39,7 @@ impl AttrInfo {
       ),
       attr_type::ARRAY => (
         "Array",
-        match attr.subtype() {
+        match attr.subtype() as ArrayType {
           array_type::NONE => "None",
           array_type::UNPACKED => "Unpacked",
           array_type::PACKED => "Packed",
@@ -48,7 +49,7 @@ impl AttrInfo {
       ),
       attr_type::ENUM => (
         "Enum",
-        match attr.subtype() {
+        match attr.subtype() as EnumValueType {
           enum_value_type::SV_INTEGER => "SvInteger",
           enum_value_type::SV_BIT => "SvBit",
           enum_value_type::SV_LOGIC => "SvLogic",
@@ -70,7 +71,7 @@ impl AttrInfo {
       ),
       attr_type::PACK => (
         "Pack",
-        match attr.subtype() {
+        match attr.subtype() as PackType {
           pack_type::NONE => "None",
           pack_type::UNPACKED => "Unpacked",
           pack_type::PACKED => "Packed",
