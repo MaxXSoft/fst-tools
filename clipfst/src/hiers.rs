@@ -1,4 +1,4 @@
-use fstapi::{Error, Handle, Hier, Reader, Result, Scope, ScopeType, Writer};
+use fstapi::{Error, Handle, Hier, Reader, Result, Scope, ScopeType, Writer, var_type};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -62,10 +62,20 @@ pub fn build(
           }
         }
         // Write the current variable to the output.
+        // The hierarchy reports the EVCD port bit width, while its writer API
+        // accepts the value plus two strength vectors and their separators.
+        let length = if v.ty() == var_type::VCD_PORT {
+          v.length()
+            .checked_mul(3)
+            .and_then(|length| length.checked_add(2))
+            .ok_or(Error::InvalidOperation)?
+        } else {
+          v.length()
+        };
         let handle = writer.create_var(
           v.ty(),
           v.direction(),
-          v.length(),
+          length,
           name,
           handles.get(&v.handle()).copied(),
         )?;

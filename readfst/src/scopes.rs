@@ -39,6 +39,7 @@ impl ScopeInfo {
         scope_type::VHDL_IF_GENERATE => "VhdlIfGenerate",
         scope_type::VHDL_GENERATE => "VhdlGenerate",
         scope_type::VHDL_PACKAGE => "VhdlPackage",
+        scope_type::SV_ARRAY => "SvArray",
         _ => unreachable!(),
       },
       name: scope.name()?.into(),

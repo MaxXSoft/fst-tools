@@ -1,4 +1,3 @@
-use crate::try_or_exit;
 use fstapi::{Handle, Reader, Result, Writer};
 use std::collections::HashMap;
 use std::mem;
@@ -10,7 +9,7 @@ pub struct VcdWriter {
   end_time: u64,
   handles: HashMap<Handle, Handle>,
   last_time: u64,
-  last_values: HashMap<Handle, Box<[u8]>>,
+  last_values: HashMap<Handle, (Box<[u8]>, bool)>,
 }
 
 impl VcdWriter {
@@ -26,60 +25,57 @@ impl VcdWriter {
   }
 
   pub fn write(&mut self, reader: &mut Reader) -> Result<()> {
+    // The writer accepts real values as native doubles, and variable-length
+    // values need an explicit time before their first emission.
+    reader.set_native_doubles_on_callback(true);
+    self.writer.emit_time_change(0)?;
+    let mut result = Ok(());
     reader.for_each_block(|time, handle, value, var_len| {
-      // Check time range.
-      if !self.is_in_time_range(time, handle, value) {
-        return;
-      }
-      // Write previous value changes.
-      self.write_prev_value_changes();
-      // Write time change.
-      self.write_time_change(time);
-      // Write value change.
-      if var_len {
-        self.write_var_len_value_change(handle, value);
-      } else {
-        self.write_value_change(handle, value);
+      if result.is_ok() {
+        result = self.write_change(time, handle, value, var_len);
       }
     })?;
-    self.write_time_change(self.end_time);
+    result?;
+    // This also handles windows in which none of the selected signals change.
+    self.write_prev_value_changes()?;
+    self.write_time_change(self.end_time)
+  }
+
+  fn write_change(&mut self, time: u64, handle: Handle, value: &[u8], var_len: bool) -> Result<()> {
+    if time <= self.start_time {
+      // Values at the boundary replace earlier values of the same signal.
+      self.last_values.insert(handle, (value.into(), var_len));
+      return Ok(());
+    }
+    if time > self.end_time {
+      return Ok(());
+    }
+    self.write_prev_value_changes()?;
+    self.write_time_change(time)?;
+    self.write_value_change(handle, value, var_len)
+  }
+
+  fn write_prev_value_changes(&mut self) -> Result<()> {
+    for (handle, (value, var_len)) in mem::take(&mut self.last_values) {
+      self.write_value_change(handle, &value, var_len)?;
+    }
     Ok(())
   }
 
-  fn is_in_time_range(&mut self, time: u64, handle: Handle, value: &[u8]) -> bool {
-    if time < self.start_time {
-      // Record previous value changes.
-      self.last_values.insert(handle, value.into());
-      false
-    } else {
-      time <= self.end_time
-    }
-  }
-
-  fn write_prev_value_changes(&mut self) {
-    if !self.last_values.is_empty() {
-      for (handle, value) in mem::take(&mut self.last_values) {
-        self.write_value_change(handle, &value)
-      }
-    }
-  }
-
-  fn write_time_change(&mut self, time: u64) {
+  fn write_time_change(&mut self, time: u64) -> Result<()> {
     if time != self.last_time {
-      let ret = self.writer.emit_time_change(time - self.start_time);
-      try_or_exit!(ret, _, "Failed to write time change!");
+      self.writer.emit_time_change(time - self.start_time)?;
       self.last_time = time;
     }
+    Ok(())
   }
 
-  fn write_value_change(&mut self, handle: Handle, value: &[u8]) {
-    let ret = self.writer.emit_value_change(self.handles[&handle], value);
-    try_or_exit!(ret, _, "Failed to write value change!");
-  }
-
-  fn write_var_len_value_change(&mut self, handle: Handle, value: &[u8]) {
+  fn write_value_change(&mut self, handle: Handle, value: &[u8], var_len: bool) -> Result<()> {
     let handle = self.handles[&handle];
-    let ret = self.writer.emit_var_len_value_change(handle, value);
-    try_or_exit!(ret, _, "Failed to write value change!");
+    if var_len {
+      self.writer.emit_var_len_value_change(handle, value)
+    } else {
+      self.writer.emit_value_change(handle, value)
+    }
   }
 }

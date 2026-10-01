@@ -2,7 +2,7 @@ mod hiers;
 mod vcd;
 
 use clap::{Parser, ValueEnum};
-use fstapi::{Reader, Result, Writer, WriterPackType, writer_pack_type};
+use fstapi::{Error, Reader, Result, Writer, WriterPackType, writer_pack_type};
 use vcd::VcdWriter;
 
 #[derive(Parser)]
@@ -104,7 +104,6 @@ macro_rules! try_or_exit {
     }
   };
 }
-pub(crate) use try_or_exit;
 
 fn main() {
   try_or_exit!(try_main(), e, "Failed to clip the FST waveform: {e}!");
@@ -124,7 +123,11 @@ fn try_main() -> Result<()> {
 
   // Get and set start time and end time.
   let (start, end) = get_start_end(&reader, cli.start, cli.end);
-  reader.set_time_range_limit(start, end);
+  // Variable-length signals have no per-block initial values, so retain earlier
+  // blocks when collecting the values that are live at the clip's start.
+  reader.set_time_range_limit(reader.start_time(), end);
+  let timezero = i64::try_from(i128::from(reader.timezero()) + i128::from(start))
+    .map_err(|_| Error::InvalidOperation)?;
 
   // Create the output FST file.
   let mut writer = Writer::create(cli.output, !cli.no_comp_hier)?
@@ -132,7 +135,7 @@ fn try_main() -> Result<()> {
     .version(reader.version()?)?
     .file_type(reader.file_type())
     .timescale(reader.timescale())
-    .timezero(start as i64)
+    .timezero(timezero)
     .pack_type(cli.pack_type.into())
     .repack_on_close(cli.repack)
     .parallel_mode(cli.parallel);
