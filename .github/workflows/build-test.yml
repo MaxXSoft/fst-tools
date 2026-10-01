@@ -29,6 +29,8 @@ jobs:
 
     - name: Checkout
       uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
     - name: Setup Rust Cache
       uses: actions/cache@v3
@@ -52,3 +54,6 @@ jobs:
 
     - name: Test
       run: cargo test --workspace
+
+    - name: Verify crate package
+      run: cargo package -p fstapi

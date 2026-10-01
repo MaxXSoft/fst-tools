@@ -47,6 +47,7 @@ pub mod scope_type {
   pub use crate::capi::fstScopeType_FST_ST_GEN_ATTREND as GEN_ATTREND;
   pub use crate::capi::fstScopeType_FST_ST_MAX as MAX;
   pub use crate::capi::fstScopeType_FST_ST_MIN as MIN;
+  pub use crate::capi::fstScopeType_FST_ST_SV_ARRAY as SV_ARRAY;
   pub use crate::capi::fstScopeType_FST_ST_VCD_BEGIN as VCD_BEGIN;
   pub use crate::capi::fstScopeType_FST_ST_VCD_CLASS as VCD_CLASS;
   pub use crate::capi::fstScopeType_FST_ST_VCD_FORK as VCD_FORK;

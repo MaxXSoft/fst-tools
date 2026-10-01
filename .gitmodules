@@ -1,0 +1,3 @@
+[submodule "fstapi/vendor/libfst"]
+	path = fstapi/vendor/libfst
+	url = https://github.com/gtkwave/libfst.git

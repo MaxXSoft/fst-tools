@@ -11,7 +11,7 @@ FST is an open source file format for storing digital waveforms from HDL simulat
 
 For more details, please see:
 
-* The [source code](https://github.com/gtkwave/gtkwave/tree/e1c01753bc5db9f7b42e41b9bde651a375ec5eba/gtkwave4/src/helpers/fst) of GTKWave.
+* The [libfst source code](https://github.com/gtkwave/libfst) maintained by GTKWave.
 * The [documentation](https://gtkwave.sourceforge.net/gtkwave.pdf) of GTKWave.
 * An [unofficial specification](https://blog.timhutt.co.uk/fst_spec/) for FST format.
 
@@ -20,6 +20,23 @@ For more details, please see:
 * [`readfst`](readfst): tool for displaying information about the contents of FST waveform, like `readelf`.
 * [`findfst`](findfst): tool for finding values of signals from FST waveform, like `fstminer` tool that comes with GTKWave but more powerful.
 * [`clipfst`](clipfst): tool for clipping from FST waveform.
+
+## Building from Source
+
+Initialize the pinned libfst submodule before building:
+
+```sh
+git clone --recurse-submodules https://github.com/MaxXSoft/fst-tools.git
+cd fst-tools
+cargo build --release --workspace
+cargo test --workspace
+```
+
+For an existing checkout, run `git submodule update --init --recursive`.
+Unix builds require a C compiler, zlib development files, pthreads, and libclang
+for bindgen. The published `fstapi` crate bundles its C sources and does not need
+Git or Meson. See [upstream maintenance](fstapi/UPSTREAM.md) for the adaptation,
+update procedure, and package checks.
 
 ## Building on Windows
 
@@ -77,7 +94,9 @@ Note that we're using pthreads (with an s) instead of pthread (without s) becaus
 
 ## Rust Wrapper for FST C API
 
-This repository contains a Rust wrapper for the FST C API provided by GTKWave. See the [`fstapi`](fstapi) directory.
+This repository contains a Rust wrapper for GTKWave's standalone libfst C API.
+The upstream implementation is an unmodified submodule, with Rust adaptation and
+VCD export glue maintained separately. See the [`fstapi`](fstapi) directory.
 
 All of the tools in the repo are written in Rust using this wrapper.
 

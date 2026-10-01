@@ -11,7 +11,7 @@ FST is an open source file format for storing digital waveforms from HDL simulat
 
 For more details, please see:
 
-* The [source code](https://github.com/gtkwave/gtkwave/tree/e1c01753bc5db9f7b42e41b9bde651a375ec5eba/gtkwave4/src/helpers/fst) of GTKWave.
+* The [libfst source code](https://github.com/gtkwave/libfst) maintained by GTKWave.
 * The [documentation](https://gtkwave.sourceforge.net/gtkwave.pdf) of GTKWave.
 * An [unofficial specification](https://blog.timhutt.co.uk/fst_spec/) for FST format.
 
@@ -22,6 +22,15 @@ Add `fstapi` to your projects by running `cargo add`:
 ```
 cargo add fstapi
 ```
+
+The crate includes the pinned libfst sources. Building a Git checkout requires
+`git submodule update --init --recursive`; installing from crates.io does not.
+See [UPSTREAM.md](UPSTREAM.md) for build requirements and maintenance details.
+
+Value emissions before the first explicit timestamp occur at time zero. Invalid
+lengths and incompatible aliases are rejected before entering C. Hierarchy items
+own their data, and callback panics resume after the C traversal has cleaned up.
+The underlying C library can still terminate on fatal internal errors.
 
 ## Examples
 

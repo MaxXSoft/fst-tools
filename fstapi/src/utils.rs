@@ -34,7 +34,7 @@ impl RawToStr for *const c_char {
 
 impl RawToStr for (*const c_char, u32) {
   unsafe fn to_str<'a>(self) -> Result<&'a str> {
-    let bytes = unsafe { slice::from_raw_parts(self.0 as *const u8, self.1 as usize) };
+    let bytes = unsafe { slice::from_raw_parts(self.0.cast::<u8>(), self.1 as usize) };
     CStr::from_bytes_with_nul(bytes)
       .map_err(Error::CStrConv)?
       .to_str()

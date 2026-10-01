@@ -10,6 +10,18 @@ categories = ["api-bindings"]
 keywords = ["fst", "vcd", "waveforms", "signal"]
 readme = "README.md"
 license = "MIT OR Apache-2.0"
+include = [
+  "/src/**",
+  "/csrc/**",
+  "/tests/**",
+  "/vendor/libfst/src/**",
+  "/vendor/libfst/LICENSE",
+  "/build.rs",
+  "/README.md",
+  "/UPSTREAM.md",
+  "/LICENSE-MIT",
+  "/LICENSE-APACHE",
+]
 
 [build-dependencies]
 bindgen = "0.72.1"

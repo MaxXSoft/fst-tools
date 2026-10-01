@@ -7,8 +7,7 @@
 //!
 //! For more details, please see:
 //!
-//! * The [source code](https://github.com/gtkwave/gtkwave/tree/e1c01753bc5db9f7b42e41b9bde651a375ec5eba/gtkwave4/src/helpers/fst)
-//!   of GTKWave.
+//! * The [libfst source code](https://github.com/gtkwave/libfst) maintained by GTKWave.
 //! * The [documentation](https://gtkwave.sourceforge.net/gtkwave.pdf) of GTKWave.
 //! * An [unofficial specification](https://blog.timhutt.co.uk/fst_spec/) for FST format.
 //!

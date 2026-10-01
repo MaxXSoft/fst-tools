@@ -1,6 +1,12 @@
 use std::{env, path::PathBuf};
 
 fn main() {
+  let upstream = PathBuf::from("vendor/libfst/src");
+  assert!(
+    upstream.join("fstapi.h").is_file(),
+    "libfst sources are missing; run `git submodule update --init --recursive`"
+  );
+
   #[cfg(windows)]
   let (zlib_include_dir, mman_include_dir) = {
     // Find zlib via vcpkg.
@@ -26,10 +32,27 @@ fn main() {
   // Compile C sources to library.
   let mut cc_build = cc::Build::new();
   cc_build
-    .files(["csrc/fastlz.c", "csrc/fstapi.c", "csrc/lz4.c"])
+    .files(["fastlz.c", "fstapi.c", "lz4.c"].map(|file| upstream.join(file)))
+    .file("csrc/fst_tools.c")
+    .define("HAVE_LIBPTHREAD", None)
     .define("FST_WRITER_PARALLEL", None)
+    .include(&upstream)
     .include("csrc")
     .flag_if_supported("-Wno-unused-but-set-variable");
+
+  let target_family = env::var("CARGO_CFG_TARGET_FAMILY").unwrap_or_default();
+  if target_family == "unix" {
+    cc_build
+      .define("HAVE_FSEEKO", None)
+      .define("HAVE_REALPATH", None);
+  }
+  // The upstream Windows header supplies other CRT mappings, but these
+  // large-file functions need explicit mappings for MSVC (not MinGW).
+  if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+    cc_build
+      .define("fseeko", Some("_fseeki64"))
+      .define("ftello", Some("_ftelli64"));
+  }
 
   #[cfg(windows)]
   cc_build
@@ -40,18 +63,23 @@ fn main() {
 
   // Rebuild if C source changes.
   println!("cargo:rerun-if-changed=csrc");
+  println!("cargo:rerun-if-changed=vendor/libfst/src");
 
   // Link with zlib.
   #[cfg(not(windows))]
   println!("cargo:rustc-link-lib=z");
+  if target_family == "unix" {
+    println!("cargo:rustc-link-lib=pthread");
+  }
 
   // Generate bindings.
   let bindgen_builder = bindgen::Builder::default()
-    .header("csrc/fstapi.h")
+    .header("csrc/fst_tools.h")
     .allowlist_type(r#"(fst|FST_)\w+"#)
     .allowlist_function(r#"(fst|FST_)\w+"#)
     .allowlist_var(r#"(fst|FST_)\w+"#)
-    .clang_arg("-Icsrc");
+    .clang_arg("-Icsrc")
+    .clang_arg("-Ivendor/libfst/src");
 
   #[cfg(windows)]
   let bindgen_builder = bindgen_builder.clang_arg(format!("-I{}", zlib_include_dir.display()));

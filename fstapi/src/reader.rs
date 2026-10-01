@@ -2,9 +2,11 @@ use crate::consts::{AttrType, FileType, ScopeType, VarDir, VarType};
 use crate::types::Handle;
 use crate::utils::*;
 use crate::{Error, Result, capi};
+use std::any::Any;
+use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
-use std::num::NonZeroU32;
 use std::os::raw;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::Path;
 use std::{ptr, slice};
 
@@ -12,7 +14,9 @@ use std::{ptr, slice};
 #[derive(Debug)]
 pub struct Reader {
   /// Non-null context pointer.
-  ctx: *mut raw::c_void,
+  ctx: *mut capi::fstReaderContext,
+  signal_values: Option<Vec<SignalValueKind>>,
+  native_doubles: bool,
 }
 
 impl Reader {
@@ -26,7 +30,11 @@ impl Reader {
     if ctx.is_null() {
       Err(Error::ContextCreate)
     } else {
-      Ok(Self { ctx })
+      Ok(Self {
+        ctx,
+        signal_values: None,
+        native_doubles: false,
+      })
     }
   }
 
@@ -143,7 +151,8 @@ impl Reader {
 
   /// Sets whether to use native doubles in callback when iterating over blocks.
   pub fn set_native_doubles_on_callback(&mut self, enable: bool) {
-    unsafe { capi::fstReaderIterBlocksSetNativeDoublesOnCallback(self.ctx, enable as i32) }
+    unsafe { capi::fstReaderIterBlocksSetNativeDoublesOnCallback(self.ctx, enable as i32) };
+    self.native_doubles = enable;
   }
 
   /// Returns an iterator over the hierarchies of the waveform.
@@ -157,7 +166,6 @@ impl Reader {
 
   /// Returns an iterator over the variables of the waveform.
   pub fn vars(&mut self) -> Vars<'_> {
-    unsafe { capi::fstReaderIterateHierRewind(self.ctx) };
     Vars {
       hiers: self.hiers(),
       scopes: Vec::new(),
@@ -165,6 +173,9 @@ impl Reader {
   }
 
   /// Runs the given callback on each block of the waveform.
+  ///
+  /// If the callback panics, further callbacks are skipped while libfst finishes
+  /// the traversal, then the panic resumes after its C stack has returned.
   ///
   /// The callback will be called when value changes, and is defined as:
   ///
@@ -177,19 +188,18 @@ impl Reader {
   where
     F: FnMut(u64, Handle, &[u8], bool),
   {
+    self.cache_signal_values()?;
+
     extern "C" fn c_callback<F>(
       data: *mut raw::c_void,
       time: u64,
       handle: capi::fstHandle,
       value: *const raw::c_uchar,
-      len: u32,
     ) where
       F: FnMut(u64, Handle, &[u8], bool),
     {
-      let data: &mut F = unsafe { &mut *(data as *mut F) };
-      let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
-      let value = unsafe { slice::from_raw_parts(value, len as usize) };
-      data(time, handle, value, false);
+      let state = unsafe { &mut *data.cast::<BlockCallback<'_, F>>() };
+      state.invoke(time, handle, value, None);
     }
 
     extern "C" fn c_callback_var_len<F>(
@@ -201,38 +211,97 @@ impl Reader {
     ) where
       F: FnMut(u64, Handle, &[u8], bool),
     {
-      let data: &mut F = unsafe { &mut *(data as *mut F) };
-      let handle = unsafe { Handle(NonZeroU32::new_unchecked(handle)) };
-      let value = unsafe { slice::from_raw_parts(value, len as usize) };
-      data(time, handle, value, true);
+      let state = unsafe { &mut *data.cast::<BlockCallback<'_, F>>() };
+      state.invoke(time, handle, value, Some(len));
     }
 
+    let mut state = BlockCallback {
+      callback: &mut callback,
+      signal_values: self.signal_values.as_deref().unwrap(),
+      native_doubles: self.native_doubles,
+      panic: None,
+      invalid_value: false,
+    };
     let ret = unsafe {
       capi::fstReaderIterBlocks2(
         self.ctx,
         Some(c_callback::<F>),
         Some(c_callback_var_len::<F>),
-        (&mut callback) as *mut _ as *mut raw::c_void,
+        (&mut state as *mut BlockCallback<'_, F>).cast(),
         ptr::null_mut(),
       )
     };
-    match ret {
-      0 => Err(Error::InvalidOperation),
-      _ => Ok(()),
+    // A callback cannot unwind through C. Let libfst finish and release its
+    // traversal buffers before continuing the panic on the Rust side.
+    if let Some(payload) = state.panic {
+      resume_unwind(payload);
     }
+    if ret == 0 || state.invalid_value {
+      Err(Error::InvalidOperation)
+    } else {
+      Ok(())
+    }
+  }
+
+  /// Caches the encoding of each physical facility, without duplicating aliases.
+  fn cache_signal_values(&mut self) -> Result<()> {
+    if self.signal_values.is_some() {
+      return Ok(());
+    }
+    let mut values = Vec::new();
+    for hier in self.hiers() {
+      let Hier::Var(var) = hier else { continue };
+      if var.is_alias() {
+        continue;
+      }
+      if u32::from(var.handle()) as usize != values.len() + 1 {
+        return Err(Error::InvalidOperation);
+      }
+      let kind = match var.ty() {
+        crate::var_type::VCD_REAL
+        | crate::var_type::VCD_REAL_PARAMETER
+        | crate::var_type::VCD_REALTIME
+        | crate::var_type::SV_SHORTREAL => SignalValueKind::Real,
+        crate::var_type::GEN_STRING => SignalValueKind::Variable,
+        _ if var.length() == 0 => SignalValueKind::Variable,
+        ty => {
+          // IterateHier exposes the bit width of an EVCD port; callbacks carry
+          // its value and two strengths, separated by two spaces.
+          let len = if ty == crate::var_type::VCD_PORT {
+            var
+              .length()
+              .checked_mul(3)
+              .and_then(|len| len.checked_add(2))
+          } else {
+            Some(var.length())
+          }
+          .ok_or(Error::InvalidOperation)?;
+          if len as u64 > isize::MAX as u64 {
+            return Err(Error::InvalidOperation);
+          }
+          SignalValueKind::Fixed(len as usize)
+        }
+      };
+      values.push(kind);
+    }
+    self.signal_values = Some(values);
+    Ok(())
   }
 
   /// Dumps the content of waveform as VCD format to the given file
   /// ([Some(path)]) or the standard output ([None]).
+  ///
+  /// Enables the process mask for every facility. Existing time range limits
+  /// remain in effect.
   pub fn dump_as_vcd<P>(&mut self, path: Option<P>) -> Result<()>
   where
     P: AsRef<Path>,
   {
     let ret = if let Some(path) = path {
       let path = path.to_str()?.into_cstring()?;
-      unsafe { capi::fstReaderDumpToVcdFile(self.ctx, path.as_ptr()) }
+      unsafe { capi::fstToolsReaderDumpToVcdFile(self.ctx, path.as_ptr()) }
     } else {
-      unsafe { capi::fstReaderDumpToVcdFile(self.ctx, ptr::null()) }
+      unsafe { capi::fstToolsReaderDumpToVcdFile(self.ctx, ptr::null()) }
     };
     match ret {
       0 => Ok(()),
@@ -247,14 +316,73 @@ impl Drop for Reader {
   }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum SignalValueKind {
+  Fixed(usize),
+  Real,
+  Variable,
+}
+
+struct BlockCallback<'a, F> {
+  callback: &'a mut F,
+  signal_values: &'a [SignalValueKind],
+  native_doubles: bool,
+  panic: Option<Box<dyn Any + Send>>,
+  invalid_value: bool,
+}
+
+impl<F> BlockCallback<'_, F>
+where
+  F: FnMut(u64, Handle, &[u8], bool),
+{
+  fn invoke(&mut self, time: u64, handle: u32, value: *const u8, var_len: Option<u32>) {
+    if self.panic.is_some() || self.invalid_value {
+      return;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| -> Result<()> {
+      let handle = Handle::new(handle).ok_or(Error::InvalidOperation)?;
+      let kind = self
+        .signal_values
+        .get(u32::from(handle) as usize - 1)
+        .ok_or(Error::InvalidOperation)?;
+      let len = match (kind, var_len) {
+        (SignalValueKind::Variable, Some(len)) => len as usize,
+        (SignalValueKind::Fixed(len), None) => *len,
+        (SignalValueKind::Real, None) if self.native_doubles => 8,
+        (SignalValueKind::Real, None) if !value.is_null() => {
+          // Only textual real callbacks require a strlen scan. In native mode
+          // the double is binary and can contain NUL bytes.
+          unsafe { CStr::from_ptr(value.cast()) }.to_bytes().len()
+        }
+        _ => return Err(Error::InvalidOperation),
+      };
+      if len > isize::MAX as usize || (len != 0 && value.is_null()) {
+        return Err(Error::InvalidOperation);
+      }
+      let value = if len == 0 {
+        &[]
+      } else {
+        unsafe { slice::from_raw_parts(value, len) }
+      };
+      (self.callback)(time, handle, value, var_len.is_some());
+      Ok(())
+    }));
+    match result {
+      Ok(Ok(())) => {}
+      Ok(Err(_)) => self.invalid_value = true,
+      Err(payload) => self.panic = Some(payload),
+    }
+  }
+}
+
 /// An iterator over the hierarchies of an FST waveform.
 ///
 /// This struct is created by the [`hiers`](Reader::hiers)
 /// method on [`Reader`].
 #[derive(Debug)]
 pub struct Hiers<'a> {
-  ctx: *mut raw::c_void,
-  phantom: PhantomData<&'a ()>,
+  ctx: *mut capi::fstReaderContext,
+  phantom: PhantomData<&'a mut Reader>,
 }
 
 impl<'a> Iterator for Hiers<'a> {
@@ -266,6 +394,8 @@ impl<'a> Iterator for Hiers<'a> {
 }
 
 /// Hierarchy of FST waveform.
+///
+/// Each item owns its data and remains valid when its iterator advances.
 #[derive(Debug)]
 pub enum Hier<'a> {
   /// Begin of a scope.
@@ -281,99 +411,157 @@ pub enum Hier<'a> {
 }
 
 impl<'a> Hier<'a> {
-  /// Creates a new hierarchy.
-  fn new(hier: &'a capi::fstHier) -> Self {
+  /// Copies the record and strings before libfst reuses its hierarchy storage.
+  fn new(hier: &capi::fstHier) -> Self {
     match hier.htyp as capi::fstHierType {
-      capi::fstHierType_FST_HT_SCOPE => Self::Scope(Scope(unsafe { &hier.u.scope })),
+      capi::fstHierType_FST_HT_SCOPE => {
+        let scope = unsafe { &hier.u.scope };
+        Self::Scope(Scope {
+          ty: scope.typ as ScopeType,
+          name: unsafe { CStr::from_ptr(scope.name) }.to_owned(),
+          component: unsafe { CStr::from_ptr(scope.component) }.to_owned(),
+          phantom: PhantomData,
+        })
+      }
       capi::fstHierType_FST_HT_UPSCOPE => Self::Upscope,
-      capi::fstHierType_FST_HT_VAR => Self::Var(Var(unsafe { &hier.u.var })),
-      capi::fstHierType_FST_HT_ATTRBEGIN => Self::AttrBegin(Attr(unsafe { &hier.u.attr })),
+      capi::fstHierType_FST_HT_VAR => {
+        let var = unsafe { &hier.u.var };
+        Self::Var(Var {
+          ty: var.typ as VarType,
+          direction: var.direction as VarDir,
+          name: unsafe { CStr::from_ptr(var.name) }.to_owned(),
+          length: var.length,
+          handle: Handle::new(var.handle).expect("libfst returned a zero variable handle"),
+          is_alias: var.is_alias() != 0,
+          phantom: PhantomData,
+        })
+      }
+      capi::fstHierType_FST_HT_ATTRBEGIN => {
+        let attr = unsafe { &hier.u.attr };
+        Self::AttrBegin(Attr {
+          ty: attr.typ as AttrType,
+          subtype: attr.subtype as u32,
+          name: unsafe { CStr::from_ptr(attr.name) }.to_owned(),
+          arg: attr.arg,
+          arg_from_name: attr.arg_from_name,
+          phantom: PhantomData,
+        })
+      }
       capi::fstHierType_FST_HT_ATTREND => Self::AttrEnd,
-      _ => unreachable!(),
+      _ => unreachable!("libfst returned an unknown hierarchy type"),
     }
   }
 }
 
 /// A scope in FST hierarchy.
 #[derive(Debug)]
-pub struct Scope<'a>(&'a capi::fstHier__bindgen_ty_1_fstHierScope);
+pub struct Scope<'a> {
+  ty: ScopeType,
+  name: CString,
+  component: CString,
+  phantom: PhantomData<&'a ()>,
+}
 
-impl<'a> Scope<'a> {
+impl Scope<'_> {
   /// Returns scope type.
   pub fn ty(&self) -> ScopeType {
-    self.0.typ as ScopeType
+    self.ty
   }
 
   /// Returns scope name.
   pub fn name(&self) -> Result<&str> {
-    unsafe { (self.0.name, self.0.name_length + 1).to_str() }
+    self
+      .name
+      .to_str()
+      .map_err(|e| Error::InvalidUtf8Str(Some(e)))
   }
 
-  /// Returns scope name as raw C string.
+  /// Returns scope name as a C string, valid until this scope is dropped.
   pub fn name_raw(&self) -> *const raw::c_char {
-    self.0.name
+    self.name.as_ptr()
   }
 
   /// Returns scope component.
   pub fn component(&self) -> Result<&str> {
-    unsafe { (self.0.component, self.0.component_length + 1).to_str() }
+    self
+      .component
+      .to_str()
+      .map_err(|e| Error::InvalidUtf8Str(Some(e)))
   }
 
-  /// Returns scope component as raw C string.
+  /// Returns scope component as a C string, valid until this scope is dropped.
   pub fn component_raw(&self) -> *const raw::c_char {
-    self.0.component
+    self.component.as_ptr()
   }
 }
 
 /// A variable in FST hierarchy.
 #[derive(Debug)]
-pub struct Var<'a>(&'a capi::fstHier__bindgen_ty_1_fstHierVar);
+pub struct Var<'a> {
+  ty: VarType,
+  direction: VarDir,
+  name: CString,
+  length: u32,
+  handle: Handle,
+  is_alias: bool,
+  phantom: PhantomData<&'a ()>,
+}
 
-impl<'a> Var<'a> {
+impl Var<'_> {
   /// Returns variable type.
   pub fn ty(&self) -> VarType {
-    self.0.typ as VarType
+    self.ty
   }
 
   /// Returns variable direction.
   pub fn direction(&self) -> VarDir {
-    self.0.direction as VarDir
+    self.direction
   }
 
   /// Returns variable name.
   pub fn name(&self) -> Result<&str> {
-    unsafe { (self.0.name, self.0.name_length + 1).to_str() }
+    self
+      .name
+      .to_str()
+      .map_err(|e| Error::InvalidUtf8Str(Some(e)))
   }
 
-  /// Returns variable name as raw C string.
+  /// Returns variable name as a C string, valid until this variable is dropped.
   pub fn name_raw(&self) -> *const raw::c_char {
-    self.0.name
+    self.name.as_ptr()
   }
 
   /// Returns variable length in bits.
   pub fn length(&self) -> u32 {
-    self.0.length
+    self.length
   }
 
   /// Returns variable handle.
   pub fn handle(&self) -> Handle {
-    unsafe { Handle(NonZeroU32::new_unchecked(self.0.handle)) }
+    self.handle
   }
 
   /// Returns `true` if variable is an alias.
   pub fn is_alias(&self) -> bool {
-    self.0.is_alias() != 0
+    self.is_alias
   }
 }
 
 /// An attribute in FST hierarchy.
 #[derive(Debug)]
-pub struct Attr<'a>(&'a capi::fstHier__bindgen_ty_1_fstHierAttr);
+pub struct Attr<'a> {
+  ty: AttrType,
+  subtype: u32,
+  name: CString,
+  arg: u64,
+  arg_from_name: u64,
+  phantom: PhantomData<&'a ()>,
+}
 
-impl<'a> Attr<'a> {
+impl Attr<'_> {
   /// Returns attribute type.
   pub fn ty(&self) -> AttrType {
-    self.0.typ as AttrType
+    self.ty
   }
 
   /// Returns attribute subtype.
@@ -383,17 +571,20 @@ impl<'a> Attr<'a> {
   /// [`EnumValueType`](crate::consts::EnumValueType) or
   /// [`PackType`](crate::consts::PackType).
   pub fn subtype(&self) -> u32 {
-    self.0.subtype as u32
+    self.subtype
   }
 
   /// Returns attribute name.
   pub fn name(&self) -> Result<&str> {
-    unsafe { (self.0.name, self.0.name_length + 1).to_str() }
+    self
+      .name
+      .to_str()
+      .map_err(|e| Error::InvalidUtf8Str(Some(e)))
   }
 
-  /// Returns attribute name as raw C string.
+  /// Returns attribute name as a C string, valid until this attribute is dropped.
   pub fn name_raw(&self) -> *const raw::c_char {
-    self.0.name
+    self.name.as_ptr()
   }
 
   /// Returns attribute argument.
@@ -401,7 +592,7 @@ impl<'a> Attr<'a> {
   /// Argument may be number of array elements, struct members,
   /// or some other payload (possibly ignored).
   pub fn arg(&self) -> u64 {
-    self.0.arg
+    self.arg
   }
 
   /// Returns attribute argument generated by the attribute name.
@@ -412,7 +603,7 @@ impl<'a> Attr<'a> {
   /// [`misc_type::SOURCESTEM`](crate::consts::misc_type::SOURCESTEM) or
   /// [`misc_type::SOURCEISTEM`](crate::consts::misc_type::SOURCEISTEM).
   pub fn arg_from_name(&self) -> u64 {
-    self.0.arg_from_name
+    self.arg_from_name
   }
 }
 

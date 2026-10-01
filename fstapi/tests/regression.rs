@@ -180,7 +180,7 @@ fn all_real_types_use_eight_byte_values() {
     for (event, handle) in actual.iter().zip(&handles) {
       assert_eq!(event.handle, *handle);
       assert_eq!(event.time, 0);
-      assert_eq!(event.variable_length, false);
+      assert!(!event.variable_length);
       assert_eq!(
         event.value,
         if native {
