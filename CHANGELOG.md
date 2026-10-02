@@ -19,12 +19,22 @@
 * Preserve real, EVCD port, and string values when clipping, including initial
   values for windows with no internal changes, and preserve the input timezero.
 * Display SystemVerilog array scopes in `readfst`.
+* Correct the pinned libfst's real-alias table overflow during opening/export and
+  bound encoded writer sections before entering its 32-bit buffer arithmetic.
+* Reject clipping to the input file, including linked paths, before creating
+  output; preserve changes at the clip boundary and dump activity intervals.
+* Preserve binary source attributes when clipping and display their decoded
+  indices in `readfst`; handle empty `--no-aliases` variable tables.
+* Avoid unknown-state false matches in hexadecimal regex searches and preserve
+  raw string bytes in buffered `findfst` output, reporting output failures.
+* Skip earlier value blocks when clipping only fixed-width signals.
 
 ### Added
 
 * Crate and command-line integration regressions.
 * SV array scope constant.
 * CI verification of packaged source builds.
+* Linux CI clang-format checks for the project-owned C adapter.
 
 ## 0.0.3 - 2025-10-22
 

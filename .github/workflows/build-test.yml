@@ -52,6 +52,14 @@ jobs:
     - name: Format
       run: cargo fmt --all --check
 
+    - name: Check C adapter formatting (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format
+        clang-format --version
+        clang-format --dry-run --Werror fstapi/csrc/*.c fstapi/csrc/*.h
+
     - name: Test
       run: cargo test --workspace
 
