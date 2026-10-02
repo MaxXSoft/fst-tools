@@ -1,4 +1,4 @@
-use fstapi::{Reader, Writer, scope_type, var_dir, var_type};
+use fstapi::{Hier, Reader, Writer, attr_type, misc_type, scope_type, var_dir, var_type};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,7 @@ struct Fixture {
 }
 
 impl Fixture {
-  fn new() -> Self {
+  fn empty() -> Self {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
       "clipfst-{}-{}",
       std::process::id(),
@@ -21,7 +21,13 @@ impl Fixture {
     ));
     fs::create_dir_all(&dir).unwrap();
     let input = dir.join("input.fst");
-    let mut writer = Writer::create(&input, true).unwrap().timezero(-7);
+    Self { dir, input }
+  }
+
+  fn new() -> Self {
+    let fixture = Self::empty();
+    let input = &fixture.input;
+    let mut writer = Writer::create(input, true).unwrap().timezero(-7);
     writer
       .set_scope(scope_type::VCD_MODULE, "top", "top")
       .unwrap();
@@ -60,7 +66,7 @@ impl Fixture {
     }
     writer.emit_time_change(40).unwrap();
     drop(writer);
-    Self { dir, input }
+    fixture
   }
 
   fn clip(&self, name: &str, args: &[&str]) -> PathBuf {
@@ -278,5 +284,170 @@ fn invalid_windows_and_missing_signals_report_failure() {
       .output()
       .unwrap();
     assert!(!result.status.success());
+  }
+}
+
+#[test]
+fn failed_in_place_selection_preserves_input_without_extra_files() {
+  let fixture = Fixture::new();
+  let original = fs::read(&fixture.input).unwrap();
+  let result = Command::new(env!("CARGO_BIN_EXE_clipfst"))
+    .arg(&fixture.input)
+    .arg(&fixture.input)
+    .args(["-S", "^missing$"])
+    .output()
+    .unwrap();
+  assert!(!result.status.success());
+  assert_eq!(fs::read(&fixture.input).unwrap(), original);
+  assert_eq!(fs::read_dir(&fixture.dir).unwrap().count(), 1);
+}
+
+#[test]
+fn rejects_input_aliases_before_creating_output() {
+  let fixture = Fixture::new();
+  let original = fs::read(&fixture.input).unwrap();
+  let hardlink = fixture.dir.join("hardlink.fst");
+  fs::hard_link(&fixture.input, &hardlink).unwrap();
+  let outputs = vec![fixture.input.clone(), hardlink];
+  #[cfg(unix)]
+  let outputs = {
+    let mut outputs = outputs;
+    let symlink = fixture.dir.join("symlink.fst");
+    std::os::unix::fs::symlink(&fixture.input, &symlink).unwrap();
+    outputs.push(symlink);
+    outputs
+  };
+  for output in outputs {
+    let result = Command::new(env!("CARGO_BIN_EXE_clipfst"))
+      .arg(&fixture.input)
+      .arg(&output)
+      .args(["--start", "5", "--end", "15"])
+      .output()
+      .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("different files"));
+    assert_eq!(fs::read(&fixture.input).unwrap(), original);
+    assert_eq!(fs::read(&output).unwrap(), original);
+  }
+}
+
+#[test]
+fn preserves_all_changes_at_the_start_boundary() {
+  for start in [0, 10] {
+    let fixture = Fixture::empty();
+    let mut writer = Writer::create(&fixture.input, true).unwrap();
+    let value = writer
+      .create_var(var_type::VCD_EVENT, var_dir::OUTPUT, 1, "event", None)
+      .unwrap();
+    writer.emit_time_change(0).unwrap();
+    writer.emit_value_change(value, b"0").unwrap();
+    writer.emit_time_change(start).unwrap();
+    for value_change in [b"1", b"0", b"1"] {
+      writer.emit_value_change(value, value_change).unwrap();
+    }
+    writer.emit_time_change(20).unwrap();
+    drop(writer);
+    let (_, input_values) = read_values(&fixture.input);
+    let expected: Vec<_> = input_values["event"]
+      .iter()
+      .filter(|(time, _, _)| *time == start)
+      .map(|(_, value, variable)| (0, value.clone(), *variable))
+      .collect();
+    assert!(
+      expected.len() >= 3,
+      "fixture must contain same-time changes"
+    );
+    let path = fixture.clip("boundary.fst", &["--start", &start.to_string()]);
+    let (_, values) = read_values(&path);
+    assert_eq!(values["event"], expected);
+  }
+}
+
+#[test]
+fn preserves_binary_source_attributes() {
+  let fixture = Fixture::empty();
+  let mut writer = Writer::create(&fixture.input, true).unwrap();
+  writer
+    .set_attr_begin(attr_type::MISC, misc_type::PATHNAME, "source.sv", 128)
+    .unwrap();
+  for subtype in [misc_type::SOURCESTEM, misc_type::SOURCEISTEM] {
+    writer
+      .set_attr_begin_raw(
+        attr_type::MISC,
+        subtype,
+        std::ffi::CStr::from_bytes_with_nul(&[0x80, 1, 0]).unwrap(),
+        42,
+      )
+      .unwrap();
+  }
+  let signal = writer
+    .create_var(var_type::VCD_WIRE, var_dir::OUTPUT, 1, "signal", None)
+    .unwrap();
+  writer.emit_time_change(0).unwrap();
+  writer.emit_value_change(signal, b"1").unwrap();
+  writer.emit_time_change(1).unwrap();
+  drop(writer);
+  let output = fixture.clip("attributes.fst", &[]);
+  let mut reader = Reader::open(output).unwrap();
+  let sources: Vec<_> = reader
+    .hiers()
+    .filter_map(|hier| match hier {
+      Hier::AttrBegin(attr)
+        if matches!(
+          attr.subtype(),
+          misc_type::SOURCESTEM | misc_type::SOURCEISTEM
+        ) =>
+      {
+        Some((
+          attr.subtype(),
+          attr.name_cstr().to_bytes().to_vec(),
+          attr.arg_from_name(),
+          attr.arg(),
+        ))
+      }
+      _ => None,
+    })
+    .collect();
+  assert_eq!(
+    sources,
+    vec![
+      (misc_type::SOURCESTEM, vec![0x80, 1], 128, 42),
+      (misc_type::SOURCEISTEM, vec![0x80, 1], 128, 42),
+    ]
+  );
+}
+
+#[test]
+fn preserves_and_clips_dump_activity_even_without_value_changes() {
+  let fixture = Fixture::empty();
+  let mut writer = Writer::create(&fixture.input, true).unwrap();
+  let signal = writer
+    .create_var(var_type::VCD_WIRE, var_dir::OUTPUT, 1, "signal", None)
+    .unwrap();
+  writer.emit_time_change(0).unwrap();
+  writer.emit_value_change(signal, b"1").unwrap();
+  writer.emit_time_change(10).unwrap();
+  writer.emit_dump_active(false).unwrap();
+  writer.emit_time_change(20).unwrap();
+  writer.emit_dump_active(true).unwrap();
+  writer.emit_time_change(30).unwrap();
+  drop(writer);
+  for (start, end, expected) in [
+    (0, 30, vec![(10, false), (20, true)]),
+    (5, 25, vec![(5, false), (15, true)]),
+    (15, 25, vec![(0, false), (5, true)]),
+    (15, 18, vec![(0, false)]),
+    (10, 10, vec![(0, false)]),
+    (20, 20, vec![(0, true)]),
+    (25, 30, vec![]),
+  ] {
+    let path = fixture.clip(
+      &format!("activity-{start}-{end}.fst"),
+      &["--start", &start.to_string(), "--end", &end.to_string()],
+    );
+    let (reader, values) = read_values(&path);
+    assert_eq!(reader.dump_activity(), expected, "window {start}-{end}");
+    assert_eq!(reader.end_time(), end - start);
+    assert_eq!(values["signal"], vec![(0, b"1".to_vec(), false)]);
   }
 }

@@ -23,7 +23,7 @@ struct Cli {
   /// Input FST waveform file.
   input: String,
 
-  /// Output FST waveform file.
+  /// Output FST waveform file. Must be different from the input.
   output: String,
 
   /// Start time of the clip, default to the beginning.
@@ -119,13 +119,19 @@ fn try_main() -> Result<()> {
     .map(|s| try_or_exit!(regex::Regex::new(&s), e, "Invalid signal regex: {e}"));
 
   // Open the given FST file.
-  let mut reader = Reader::open(cli.input)?;
+  let mut reader = Reader::open(&cli.input)?;
+
+  // libfst unlinks an existing output before creating its writer. Reject
+  // aliases of the input as well as identical path strings before that happens.
+  match same_file::is_same_file(&cli.input, &cli.output) {
+    Ok(true) => eprintln_exit!("Input and output must be different files!"),
+    Ok(false) => {}
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+    Err(e) => eprintln_exit!("Failed to compare input and output files: {e}!"),
+  }
 
   // Get and set start time and end time.
   let (start, end) = get_start_end(&reader, cli.start, cli.end);
-  // Variable-length signals have no per-block initial values, so retain earlier
-  // blocks when collecting the values that are live at the clip's start.
-  reader.set_time_range_limit(reader.start_time(), end);
   let timezero = i64::try_from(i128::from(reader.timezero()) + i128::from(start))
     .map_err(|_| Error::InvalidOperation)?;
 
@@ -141,15 +147,15 @@ fn try_main() -> Result<()> {
     .parallel_mode(cli.parallel);
 
   // Build hierarchies for output FST file.
-  let handles = hiers::build(&mut reader, &mut writer, signal_re, cli.strip_attrs)?;
+  let selection = hiers::build(&mut reader, &mut writer, signal_re, cli.strip_attrs)?;
 
   // Update signal masks for reader.
-  if handles.len() < (reader.var_count() - reader.alias_count()) as usize {
-    if handles.is_empty() {
+  if selection.handles.len() < (reader.var_count() - reader.alias_count()) as usize {
+    if selection.handles.is_empty() {
       eprintln_exit!("No matching signals!");
     }
     reader.clear_mask_all();
-    for handle in handles.keys() {
+    for handle in selection.handles.keys() {
       reader.set_mask(*handle);
     }
   } else {
@@ -157,7 +163,7 @@ fn try_main() -> Result<()> {
   }
 
   // Write value change data.
-  VcdWriter::new(writer, start, end, handles).write(&mut reader)
+  VcdWriter::new(writer, start, end, selection).write(&mut reader)
 }
 
 fn get_start_end(reader: &Reader, start: Option<u64>, end: Option<u64>) -> (u64, u64) {

@@ -22,17 +22,22 @@ impl TryFrom<Scope<'_>> for ScopeStorage {
   }
 }
 
-/// Builds hierarchies for the output waveform.
-///
-/// Returns mappings of input handles to output handles.
+/// Selected input/output handle mappings and their storage requirements.
+pub struct Selection {
+  pub handles: HashMap<Handle, Handle>,
+  pub has_variable_values: bool,
+}
+
+/// Builds hierarchies for the output waveform and returns the selected handles.
 pub fn build(
   reader: &mut Reader,
   writer: &mut Writer,
   re: Option<Regex>,
   strip_attrs: bool,
-) -> Result<HashMap<Handle, Handle>> {
+) -> Result<Selection> {
   let mut scopes = Vec::new();
   let mut handles = HashMap::new();
+  let mut has_variable_values = false;
   // Iterate over hierarchies of the input waveform.
   for hier in reader.hiers() {
     match hier {
@@ -62,6 +67,7 @@ pub fn build(
           }
         }
         // Write the current variable to the output.
+        has_variable_values |= v.ty() == var_type::GEN_STRING || v.length() == 0;
         // The hierarchy reports the EVCD port bit width, while its writer API
         // accepts the value plus two strength vectors and their separators.
         let length = if v.ty() == var_type::VCD_PORT {
@@ -85,11 +91,14 @@ pub fn build(
 
       // Write attributes only when `strip_attrs` is `false`.
       Hier::AttrBegin(a) if !strip_attrs => {
-        writer.set_attr_begin(a.ty(), a.subtype(), a.name()?, a.arg())?
+        writer.set_attr_begin_raw(a.ty(), a.subtype(), a.name_cstr(), a.arg())?
       }
       Hier::AttrEnd if !strip_attrs => writer.set_attr_end(),
       _ => {}
     }
   }
-  Ok(handles)
+  Ok(Selection {
+    handles,
+    has_variable_values,
+  })
 }

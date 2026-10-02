@@ -11,3 +11,7 @@ license = "MIT OR Apache-2.0"
 clap = { version = "4.5.50", features = ["derive"] }
 fstapi = { path = "../fstapi" }
 regex = "1.12.2"
+same-file = "1.0.6"
+
+[dev-dependencies]
+tempfile = "3.23.0"
