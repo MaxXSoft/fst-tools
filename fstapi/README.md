@@ -23,14 +23,9 @@ Add `fstapi` to your projects by running `cargo add`:
 cargo add fstapi
 ```
 
-The crate includes the pinned libfst sources. Building a Git checkout requires
-`git submodule update --init --recursive`; installing from crates.io does not.
-See [UPSTREAM.md](UPSTREAM.md) for build requirements and maintenance details.
+The crate includes the pinned libfst sources. Building a Git checkout requires `git submodule update --init --recursive`; installing from crates.io does not. See [UPSTREAM.md](UPSTREAM.md) for build requirements and maintenance details.
 
-Value emissions before the first explicit timestamp occur at time zero. Invalid
-lengths and incompatible aliases are rejected before entering C. Hierarchy items
-own their data, and callback panics resume after the C traversal has cleaned up.
-The underlying C library can still terminate on fatal internal errors.
+Value emissions before the first explicit timestamp occur at time zero. Invalid lengths and incompatible aliases are rejected before entering C. Hierarchy items own their data, and callback panics resume after the C traversal has cleaned up. The underlying C library can still terminate on fatal internal errors.
 
 ## Examples
 
@@ -68,8 +63,8 @@ for var in reader.vars() {
 
 ## More Examples
 
-See the GitHub repository: [fst-tools](https://github.com/MaxXSoft/fst-tools), which contains 3 command line tools with this library for manipulating FST waveforms.
+See the GitHub repository: [fst-tools](https://github.com/MaxXSoft/fst-tools), which contains some command line tools with this library for manipulating FST waveforms.
 
 ## License
 
-Copyright (C) 2023 MaxXing. Licensed under either of [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option.
+Copyright (C) 2023-2026 MaxXing. Licensed under either of [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option.

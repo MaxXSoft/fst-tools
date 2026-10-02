@@ -2,9 +2,8 @@
 
 The FST implementation is the unmodified
 [gtkwave/libfst](https://github.com/gtkwave/libfst) Git submodule at
-`vendor/libfst`. The initial pin is
-`c716c1f67e21a06aaf8722830b371516e70dc657`. The submodule gitlink is the
-authoritative revision; builds do not fetch or follow the upstream branch.
+`vendor/libfst`. The submodule gitlink is the authoritative revision; builds
+do not fetch or follow the upstream branch.
 
 Initialize a source checkout before building:
 
@@ -16,7 +15,8 @@ cargo test --workspace
 The published `fstapi` crate includes the required upstream C sources, headers,
 and license. Crate users do not need Git, Meson, or a separate libfst install.
 The existing C compiler, zlib, pthreads, and libclang build requirements remain.
-Windows MSVC additionally uses the vcpkg packages described in the root README.
+Windows MSVC additionally uses the vcpkg packages described in the
+[root README](https://github.com/MaxXSoft/fst-tools/blob/master/README.md).
 
 ## Local adaptation
 
@@ -41,15 +41,9 @@ Keep upstream files unchanged. Local responsibilities are:
   clears libfst's process mask, so export explicitly enables every signal before
   writing values. The shim checks stream and close/flush errors.
 
-The public Rust `Result` does not promise recovery from every C failure.
+The public Rust `Result` DOES NOT promise recovery from every C failure.
 libfst still has fatal internal error paths, and its `void` close operation
-cannot report all write failures through Rust's `Drop`.
-
-The legacy modified C snapshot remains in Git history, last present before the
-submodule migration. It originated from GTKWave
-`e1c01753bc5db9f7b42e41b9bde651a375ec5eba`, with Rust-specific signature,
-configuration, NULL-date, and Windows compatibility changes. Those changes
-should not be reapplied to the upstream submodule.
+CANNOT report all write failures through Rust's `Drop`.
 
 ## Updating the pin
 
@@ -75,8 +69,7 @@ should not be reapplied to the upstream submodule.
 5. Commit the gitlink update with any necessary wrapper changes and record the
    upstream revision and validation in the commit description.
 
-`libfst` had no published tags at the initial migration, so use reviewed commit
-IDs. Actual engine fixes should be proposed upstream; do not silently edit the
+Actual engine fixes should be proposed upstream; do not silently edit the
 submodule or fetch/patch sources during a Cargo build.
 
 ## Tests

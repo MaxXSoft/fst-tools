@@ -22,8 +22,9 @@
 
 ### Added
 
-* Crate and command-line integration regressions, SV array scope constant, and
-  CI verification of packaged source builds.
+* Crate and command-line integration regressions.
+* SV array scope constant.
+* CI verification of packaged source builds.
 
 ## 0.0.3 - 2025-10-22
 

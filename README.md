@@ -32,11 +32,7 @@ cargo build --release --workspace
 cargo test --workspace
 ```
 
-For an existing checkout, run `git submodule update --init --recursive`.
-Unix builds require a C compiler, zlib development files, pthreads, and libclang
-for bindgen. The published `fstapi` crate bundles its C sources and does not need
-Git or Meson. See [upstream maintenance](fstapi/UPSTREAM.md) for the adaptation,
-update procedure, and package checks.
+For an existing checkout, run `git submodule update --init --recursive`. Unix builds require a C compiler, zlib development files, pthreads, and libclang for bindgen. See [upstream maintenance](fstapi/UPSTREAM.md) for the adaptation, update procedure, and package checks.
 
 ## Building on Windows
 
@@ -94,9 +90,7 @@ Note that we're using pthreads (with an s) instead of pthread (without s) becaus
 
 ## Rust Wrapper for FST C API
 
-This repository contains a Rust wrapper for GTKWave's standalone libfst C API.
-The upstream implementation is an unmodified submodule, with Rust adaptation and
-VCD export glue maintained separately. See the [`fstapi`](fstapi) directory.
+This repository contains a Rust wrapper for GTKWave's standalone libfst C API. The upstream implementation is an unmodified submodule, with Rust adaptation and VCD export glue maintained separately. See the [`fstapi`](fstapi) directory.
 
 All of the tools in the repo are written in Rust using this wrapper.
 
@@ -106,4 +100,4 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-Copyright (C) 2023-2025 MaxXing. Licensed under either of [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option.
+Copyright (C) 2023-2026 MaxXing. Licensed under either of [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option.
