@@ -41,13 +41,17 @@ impl ValueMatcher for RegexHexMatcher {
       .rchunks(4)
       .rev()
       .map(|ds| {
-        let digit = ds
-          .iter()
-          .fold(0, |ans, d| (ans << 1) | ((*d != b'0') as u32));
-        char::from_digit(digit, 16).unwrap() as u8
+        let digit = ds.iter().try_fold(0, |ans, d| match d {
+          b'0' => Some(ans << 1),
+          b'1' => Some((ans << 1) | 1),
+          _ => None,
+        })?;
+        Some(char::from_digit(digit, 16).unwrap() as u8)
       })
-      .collect::<Vec<_>>();
-    self.re.is_match(&hex)
+      .collect::<Option<Vec<_>>>();
+    // Only known binary values have a numeric hexadecimal representation.
+    // Skip unknown/high-impedance states and nonbinary string/real values.
+    hex.is_some_and(|hex| self.re.is_match(&hex))
   }
 }
 
@@ -81,6 +85,21 @@ impl ValueMatcher for ExactMatcher {
         .rev()
         .zip(self.exact.iter().rev())
         .all(|(l, r)| l == r),
+    }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn hex_regex_preserves_partial_nibbles_and_rejects_nonbinary_values() {
+    let partial = RegexHexMatcher::new(Regex::new("^1f$").unwrap());
+    assert!(partial.is_match(b"11111"));
+    let all = RegexHexMatcher::new(Regex::new(".*").unwrap());
+    for value in [&b"0x01"[..], b"1z11", b"XXXX", b"ZZZZ", b"1.25", b"\xff"] {
+      assert!(!all.is_match(value), "{value:?}");
     }
   }
 }

@@ -84,7 +84,17 @@ impl AttrInfo {
     Ok(Self {
       ty,
       subtype,
-      name: attr.name()?.into(),
+      // Source stems store a binary varint in this field, not a text name.
+      // Its decoded source-file index is displayed in Arg From Name below.
+      name: if attr.ty() == attr_type::MISC
+        && matches!(
+          attr.subtype() as MiscType,
+          misc_type::SOURCESTEM | misc_type::SOURCEISTEM
+        ) {
+        String::new()
+      } else {
+        attr.name()?.into()
+      },
       arg: attr.arg(),
       arg_from_name: attr.arg_from_name(),
     })

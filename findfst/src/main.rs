@@ -6,8 +6,36 @@ mod printer;
 use checker::VarInfo;
 use clap::Parser;
 use find::{MatchInfo, find_value};
-use fstapi::{Reader, Result};
-use std::process;
+use fstapi::Reader;
+use std::{fmt, io, process};
+
+enum Error {
+  Fst(fstapi::Error),
+  Output(io::Error),
+}
+
+impl fmt::Display for Error {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      Self::Fst(e) => e.fmt(f),
+      Self::Output(e) => write!(f, "failed to write output: {e}"),
+    }
+  }
+}
+
+impl From<fstapi::Error> for Error {
+  fn from(value: fstapi::Error) -> Self {
+    Self::Fst(value)
+  }
+}
+
+impl From<io::Error> for Error {
+  fn from(value: io::Error) -> Self {
+    Self::Output(value)
+  }
+}
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Parser)]
 #[command(
@@ -31,6 +59,7 @@ struct Cli {
   value: String,
 
   /// Use lowercase hexadecimal format value instead of binary format.
+  /// With --regex, values containing states other than 0 and 1 are skipped.
   #[arg(short = 'x', long)]
   hex: bool,
 

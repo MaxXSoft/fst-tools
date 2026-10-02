@@ -157,6 +157,9 @@ impl VarSection for NoAliasesVars {
 impl ToTable for NoAliasesVars {
   fn to_table(&self) -> tabled::Table {
     let mut table = self.0.to_table();
+    if self.0.vars().is_empty() {
+      return table;
+    }
     table
       .with(Disable::row(FirstRow))
       .with(Disable::column(LastColumn))

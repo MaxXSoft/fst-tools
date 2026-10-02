@@ -1,4 +1,5 @@
-use fstapi::{Writer, scope_type, var_dir, var_type};
+use fstapi::{Writer, attr_type, misc_type, scope_type, var_dir, var_type};
+use std::ffi::CString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -116,4 +117,87 @@ fn displays_system_verilog_array_scope() {
   let output = String::from_utf8(result.stdout).unwrap();
   assert!(output.contains("SvArray"), "{output}");
   assert!(output.contains("top.memory.[0]"), "{output}");
+}
+
+#[test]
+fn displays_empty_variable_table_without_aliases() {
+  let dir =
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("readfst-empty-{}", std::process::id()));
+  fs::create_dir_all(&dir).unwrap();
+  let fixture = Fixture(dir);
+  let path = fixture.0.join("empty.fst");
+  let mut writer = Writer::create(&path, true).unwrap();
+  writer.emit_time_change(0).unwrap();
+  writer.emit_time_change(10).unwrap();
+  drop(writer);
+
+  for args in [
+    vec!["--vars", "--no-aliases"],
+    vec!["--all", "--no-aliases"],
+  ] {
+    let result = Command::new(env!("CARGO_BIN_EXE_readfst"))
+      .arg(&path)
+      .args(args)
+      .output()
+      .unwrap();
+    assert!(
+      result.status.success(),
+      "{}",
+      String::from_utf8_lossy(&result.stderr)
+    );
+    let output = String::from_utf8(result.stdout).unwrap();
+    assert!(output.contains("Variables"), "{output}");
+    assert!(output.contains("None"), "{output}");
+  }
+}
+
+#[test]
+fn displays_binary_source_stem_attribute_arguments() {
+  let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+    .join(format!("readfst-source-stem-{}", std::process::id()));
+  fs::create_dir_all(&dir).unwrap();
+  let fixture = Fixture(dir);
+  let path = fixture.0.join("sources.fst");
+  let mut writer = Writer::create(&path, true).unwrap();
+  for (subtype, source, line) in [
+    (misc_type::SOURCESTEM, 128, 300),
+    (misc_type::SOURCEISTEM, 129, 400),
+  ] {
+    let name = CString::new(vec![source, 1]).unwrap();
+    writer
+      .set_attr_begin_raw(attr_type::MISC, subtype, &name, line)
+      .unwrap();
+  }
+  writer.set_scope(scope_type::VCD_MODULE, "top", "").unwrap();
+  let handle = writer
+    .create_var(var_type::VCD_WIRE, var_dir::OUTPUT, 1, "data", None)
+    .unwrap();
+  writer.set_upscope();
+  writer.emit_time_change(0).unwrap();
+  writer.emit_value_change(handle, b"0").unwrap();
+  writer.emit_time_change(10).unwrap();
+  drop(writer);
+
+  let result = Command::new(env!("CARGO_BIN_EXE_readfst"))
+    .arg(&path)
+    .arg("--attrs")
+    .output()
+    .unwrap();
+  assert!(
+    result.status.success(),
+    "{}",
+    String::from_utf8_lossy(&result.stderr)
+  );
+  let output = String::from_utf8(result.stdout).unwrap();
+  for expected in [
+    ["Misc", "SourceStem", "300", "128"],
+    ["Misc", "SourceIStem", "400", "129"],
+  ] {
+    assert!(
+      output
+        .lines()
+        .any(|line| line.trim_matches('│').split_whitespace().eq(expected)),
+      "{output}"
+    );
+  }
 }

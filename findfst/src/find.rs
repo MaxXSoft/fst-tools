@@ -1,10 +1,12 @@
+use crate::Result;
 use crate::checker::{DenseChecker, DenseOnceChecker, SparseChecker, SparseOnceChecker};
 use crate::checker::{VarChecker, VarInfo};
 use crate::matcher::{ExactMatcher, RegexHexMatcher, RegexMatcher, ValueMatcher};
 use crate::printer::{FullPrinter, NamePrinter, Printer};
-use fstapi::{Handle, Reader, Result};
+use fstapi::{Handle, Reader};
 use regex::{Error as RegexError, bytes::Regex};
 use std::fmt;
+use std::io::{self, BufWriter, Write};
 
 /// Errors that can occurr when constructing [`MatchInfo`].
 pub enum Error {
@@ -144,37 +146,54 @@ where
   C: VarChecker<T>,
   P: Printer,
 {
+  let mut output = BufWriter::new(io::stdout().lock());
+  let mut output_error = None;
   reader.for_each_block(|time, handle, value, _| {
-    find_value_callback(
-      &value_matcher,
-      &mut var_checker,
-      &printer,
-      time,
-      handle,
-      value,
-    )
-  })
+    // The C traversal cannot return an I/O error from this callback. Preserve
+    // the first error and report it after the reader has cleaned up.
+    if output_error.is_none() {
+      output_error = find_value_callback(
+        &value_matcher,
+        &mut var_checker,
+        &printer,
+        &mut output,
+        time,
+        handle,
+        value,
+      )
+      .err();
+    }
+  })?;
+  if let Some(error) = output_error {
+    return Err(error.into());
+  }
+  output.flush()?;
+  Ok(())
 }
 
 /// Callback of FST block iterator.
 /// Runs value matcher, variable checker and printer.
-fn find_value_callback<M, T, C, P>(
+fn find_value_callback<M, T, C, P, W>(
   value_matcher: &M,
   var_checker: &mut C,
   printer: &P,
+  output: &mut W,
   time: u64,
   handle: Handle,
   value: &[u8],
-) where
+) -> io::Result<()>
+where
   M: ValueMatcher,
   C: VarChecker<T>,
   P: Printer,
+  W: Write,
 {
   // Check if value matches.
   if value_matcher.is_match(value) {
     // Check the current variable and print.
     if let Some(name) = var_checker.check(handle) {
-      printer.print(time, name, value);
+      printer.print(output, time, name, value)?;
     }
   }
+  Ok(())
 }
