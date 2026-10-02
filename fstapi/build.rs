@@ -1,7 +1,7 @@
 use std::{env, path::PathBuf};
 
 fn main() {
-  let upstream = PathBuf::from("vendor/libfst/src");
+  let upstream = PathBuf::from("third_party/libfst/src");
   assert!(
     upstream.join("fstapi.h").is_file(),
     "libfst sources are missing; run `git submodule update --init --recursive`"
@@ -69,7 +69,7 @@ fn main() {
 
   // Rebuild if C source changes.
   println!("cargo:rerun-if-changed=csrc");
-  println!("cargo:rerun-if-changed=vendor/libfst/src");
+  println!("cargo:rerun-if-changed=third_party/libfst/src");
 
   // Link with zlib.
   if !is_windows {
@@ -86,7 +86,7 @@ fn main() {
     .allowlist_function(r#"(fst|FST_)\w+"#)
     .allowlist_var(r#"(fst|FST_)\w+"#)
     .clang_arg("-Icsrc")
-    .clang_arg("-Ivendor/libfst/src");
+    .clang_arg("-Ithird_party/libfst/src");
 
   if let Some((zlib_include_dir, _)) = &windows_includes {
     bindgen_builder = bindgen_builder.clang_arg(format!("-I{}", zlib_include_dir.display()));

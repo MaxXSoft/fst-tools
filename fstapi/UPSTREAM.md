@@ -2,7 +2,7 @@
 
 The FST implementation is the unmodified
 [gtkwave/libfst](https://github.com/gtkwave/libfst) Git submodule at
-`vendor/libfst`. The submodule gitlink is the authoritative revision; builds
+`third_party/libfst`. The submodule gitlink is the authoritative revision; builds
 do not fetch or follow the upstream branch.
 
 Initialize a source checkout before building:
@@ -49,7 +49,7 @@ CANNOT report all write failures through Rust's `Drop`.
 
 1. Fetch upstream and review the changes since the current gitlink, including
    API/header, compression, platform, and license changes.
-2. Check out the reviewed commit in `vendor/libfst` with a detached HEAD.
+2. Check out the reviewed commit in `third_party/libfst` with a detached HEAD.
 3. Run the workspace checks and package verification from the repository root:
 
    ```sh
@@ -61,8 +61,8 @@ CANNOT report all write failures through Rust's `Drop`.
    ```
 
    Before committing an update, `cargo package --allow-dirty -p fstapi` can
-   verify the pending sources. Inspect the file list for `vendor/libfst/src/`,
-   `vendor/libfst/LICENSE`, and the local shim. Packaging verifies a fresh build
+   verify the pending sources. Inspect the file list for `third_party/libfst/src/`,
+   `third_party/libfst/LICENSE`, and the local shim. Packaging verifies a fresh build
    from the extracted crate, without relying on the submodule checkout.
 4. Check Linux, macOS, and Windows MSVC CI. For changes to the reader or writer,
    also compare values and metadata from an independently generated waveform.
@@ -82,4 +82,4 @@ Each CLI has integration tests using generated waveforms. Large simulator traces
 and external simulation sources are validation inputs, not repository fixtures.
 
 The Rust wrapper is MIT OR Apache-2.0; libfst and its bundled compression code
-retain their own notices in `vendor/libfst/LICENSE` and the source headers.
+retain their own notices in `third_party/libfst/LICENSE` and the source headers.
