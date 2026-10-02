@@ -39,60 +39,57 @@ fn vcd_dump_preserves_hierarchy_values_and_reports_open_failure() {
 }
 
 #[test]
-fn real_alias_capacity_boundaries_are_rejected_before_touching_output() {
+fn real_aliases_round_trip_at_capacity_boundaries_including_zero_time() {
   let dir = TestDir::new();
-  for (unique_count, real_type, safe) in [
-    (65535, var_type::VCD_REAL, true),
-    (65536, var_type::VCD_REAL, false),
-    (65537, var_type::VCD_REAL, true),
-    (131072, var_type::VCD_REAL, false),
-    (65536, var_type::VCD_REAL_PARAMETER, false),
-    (65536, var_type::VCD_REALTIME, false),
-    (65536, var_type::SV_SHORTREAL, false),
-  ] {
-    let path = dir.path(&format!("alias-{unique_count}-{real_type}.fst"));
-    let vcd_path = path.with_extension("vcd");
-    let mut writer = Writer::create(&path, true).unwrap();
-    let real = writer
-      .create_var(real_type, var_dir::OUTPUT, 64, "real", None)
-      .unwrap();
-    for i in 1..unique_count {
-      writer
-        .create_var(
-          var_type::VCD_WIRE,
-          var_dir::OUTPUT,
-          1,
-          &format!("bit{i}"),
-          None,
-        )
-        .unwrap();
-    }
-    writer
-      .create_var(real_type, var_dir::OUTPUT, 64, "alias", Some(real))
-      .unwrap();
-    writer
-      .emit_value_change(real, &1.25_f64.to_ne_bytes())
-      .unwrap();
-    writer.emit_time_change(10).unwrap();
-    drop(writer);
+  for unique_count in [65535, 65536, 65537, 131072] {
+    for real_type in [
+      var_type::VCD_REAL,
+      var_type::VCD_REAL_PARAMETER,
+      var_type::VCD_REALTIME,
+      var_type::SV_SHORTREAL,
+    ] {
+      for end_time in [0, 10] {
+        let path = dir.path(&format!("alias-{unique_count}-{real_type}-{end_time}.fst"));
+        let vcd_path = path.with_extension("vcd");
+        let mut writer = Writer::create(&path, true).unwrap();
+        let real = writer
+          .create_var(real_type, var_dir::OUTPUT, 64, "real", None)
+          .unwrap();
+        for i in 1..unique_count {
+          writer
+            .create_var(
+              var_type::VCD_WIRE,
+              var_dir::OUTPUT,
+              1,
+              &format!("bit{i}"),
+              None,
+            )
+            .unwrap();
+        }
+        writer
+          .create_var(real_type, var_dir::OUTPUT, 64, "alias", Some(real))
+          .unwrap();
+        writer
+          .emit_value_change(real, &1.25_f64.to_ne_bytes())
+          .unwrap();
+        if end_time != 0 {
+          writer.emit_time_change(end_time).unwrap();
+        }
+        drop(writer);
 
-    let mut reader = Reader::open(&path).unwrap();
-    fs::write(&vcd_path, "existing output").unwrap();
-    let result = reader.dump_as_vcd(Some(&vcd_path));
-    if safe {
-      result.unwrap();
-      let vcd = fs::read_to_string(vcd_path).unwrap();
-      assert!(vcd.contains(" alias $end"));
-      assert!(vcd.contains("r1.25 "));
-    } else {
-      assert_eq!(result, Err(Error::InvalidOperation));
-      assert_eq!(fs::read_to_string(vcd_path).unwrap(), "existing output");
+        // At zero duration libfst processes hierarchy while opening, before
+        // dump_as_vcd. Both entry points must accept the capacity boundary.
+        let mut reader = Reader::open(&path).unwrap();
+        assert_eq!((reader.start_time(), reader.end_time()), (0, end_time));
+        assert_eq!(reader.hiers().count(), unique_count + 1);
+        reader.set_mask(real);
+        assert_eq!(events(&mut reader)[0].value, b"1.25");
+        reader.dump_as_vcd(Some(&vcd_path)).unwrap();
+        let vcd = fs::read_to_string(vcd_path).unwrap();
+        assert!(vcd.contains(" alias $end"));
+        assert!(vcd.contains("r1.25 "));
+      }
     }
-    // Preflight also leaves hierarchy and value iteration usable on failure.
-    assert_eq!(reader.hiers().count(), unique_count + 1);
-    reader.clear_mask_all();
-    reader.set_mask(real);
-    assert_eq!(events(&mut reader)[0].value, b"1.25");
   }
 }
 

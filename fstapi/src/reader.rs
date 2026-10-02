@@ -311,10 +311,6 @@ impl Reader {
   ///
   /// Enables the process mask for every facility. Existing time range limits
   /// remain in effect.
-  ///
-  /// Until the pinned libfst's real-alias table overflow is fixed upstream,
-  /// hierarchies with a real alias immediately after 65,536 (or a doubled table
-  /// capacity of) unique handles are rejected before opening the output file.
   pub fn dump_as_vcd<P>(&mut self, path: Option<P>) -> Result<()>
   where
     P: AsRef<Path>,

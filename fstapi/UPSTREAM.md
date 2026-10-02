@@ -1,9 +1,10 @@
 # Maintaining libfst
 
-The FST implementation is the unmodified
+The FST implementation is based on the unmodified
 [gtkwave/libfst](https://github.com/gtkwave/libfst) Git submodule at
 `third_party/libfst`. The submodule gitlink is the authoritative revision; builds
-do not fetch or follow the upstream branch.
+do not fetch or follow the upstream branch. One reviewed compatibility correction
+is applied to a build-local source copy, as described below.
 
 Initialize a source checkout before building:
 
@@ -24,6 +25,21 @@ Windows MSVC additionally uses the vcpkg packages described in the
 It supplies the platform configuration, including both `HAVE_LIBPTHREAD` and
 `FST_WRITER_PARALLEL`, and MSVC's 64-bit file-position mappings. Bindings are
 generated from the same upstream header used to compile the library.
+
+The pinned engine writes `signal_typs[maxhandle]` when it encounters a real
+alias in `fstReaderProcessHier`. That index denotes the next unique handle,
+and is out of bounds at a capacity boundary (65,536 handles and its doublings).
+The alias already refers to an existing facility, so the assignment is redundant.
+This function is used both by VCD export and by opening zero-duration files;
+a VCD-only preflight cannot protect all callers.
+
+`patches/real-alias.before` and `.after` record the exact context and the
+single-line removal. The build script normalizes checkout line endings, requires
+exactly one matching hunk, and writes the corrected source to `OUT_DIR/fstapi.c`.
+It fails rather than silently dropping the correction after a source update.
+The patch fragments are included in published crates. The submodule and public
+C ABI remain unchanged. Remove the correction when the fix is available in the
+reviewed upstream pin, retaining the open/read/export boundary regressions.
 
 Keep upstream files unchanged. Local responsibilities are:
 
@@ -52,12 +68,6 @@ Keep upstream files unchanged. Local responsibilities are:
 * `csrc/fst_tools.c`: manage C `FILE *` for VCD export. Hierarchy processing
   clears libfst's process mask, so export explicitly enables every signal before
   writing values. The shim checks stream and close/flush errors.
-  It also preflights the hierarchy for the pinned engine's real-alias overflow:
-  a real alias at exactly 65,536 unique handles, or any doubled table capacity,
-  returns `InvalidOperation` before the output file is opened. This deliberately
-  limits VCD export for that shape of otherwise valid FST file; ordinary reading
-  and clipping remain available. Remove the preflight after incorporating an
-  upstream fix, retaining its boundary regression tests.
 
 The public Rust `Result` DOES NOT promise recovery from every C failure.
 libfst still has fatal internal error paths, and its `void` close operation
@@ -88,8 +98,9 @@ CANNOT report all write failures through Rust's `Drop`.
 5. Commit the gitlink update with any necessary wrapper changes and record the
    upstream revision and validation in the commit description.
 
-Actual engine fixes should be proposed upstream; do not silently edit the
-submodule or fetch/patch sources during a Cargo build.
+Actual engine fixes should be proposed upstream. The documented real-alias
+correction is the sole build-time exception; do not silently edit the submodule,
+add undisclosed corrections, or fetch sources during a Cargo build.
 
 ## Tests
 

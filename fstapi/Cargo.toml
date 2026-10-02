@@ -13,6 +13,7 @@ license = "MIT OR Apache-2.0"
 include = [
   "/src/**",
   "/csrc/**",
+  "/patches/**",
   "/tests/**",
   "/third_party/libfst/src/**",
   "/third_party/libfst/LICENSE",

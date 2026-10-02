@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::{env, fs, path::Path, path::PathBuf};
 
 fn main() {
   let upstream = PathBuf::from("third_party/libfst/src");
@@ -6,6 +6,8 @@ fn main() {
     upstream.join("fstapi.h").is_file(),
     "libfst sources are missing; run `git submodule update --init --recursive`"
   );
+  let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+  let fst_source = patched_fst_source(&upstream, &out_dir);
 
   // Build scripts run on the host, so use Cargo's target configuration.
   let target_family = env::var("CARGO_CFG_TARGET_FAMILY").unwrap_or_default();
@@ -38,7 +40,8 @@ fn main() {
   // Compile C sources to library.
   let mut cc_build = cc::Build::new();
   cc_build
-    .files(["fastlz.c", "fstapi.c", "lz4.c"].map(|file| upstream.join(file)))
+    .files(["fastlz.c", "lz4.c"].map(|file| upstream.join(file)))
+    .file(fst_source)
     .file("csrc/fst_tools.c")
     .define("HAVE_LIBPTHREAD", None)
     .define("FST_WRITER_PARALLEL", None)
@@ -70,6 +73,7 @@ fn main() {
   // Rebuild if C source changes.
   println!("cargo:rerun-if-changed=csrc");
   println!("cargo:rerun-if-changed=third_party/libfst/src");
+  println!("cargo:rerun-if-changed=patches");
 
   // Link with zlib.
   if !is_windows {
@@ -97,8 +101,28 @@ fn main() {
     .expect("failed to generate bindings");
 
   // Write the bindings to file.
-  let out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("bindings.rs");
+  let out_path = out_dir.join("bindings.rs");
   bindings
     .write_to_file(out_path)
     .expect("failed to write bindings");
+}
+
+/// Apply the reviewed single-hunk compatibility correction to a build-local
+/// copy. An upstream update must explicitly review/remove the correction if
+/// its exact context changes; the checked-in submodule is never modified.
+fn patched_fst_source(upstream: &Path, out_dir: &Path) -> PathBuf {
+  let source = fs::read_to_string(upstream.join("fstapi.c"))
+    .expect("failed to read libfst source")
+    .replace("\r\n", "\n");
+  let before = include_str!("patches/real-alias.before").replace("\r\n", "\n");
+  let after = include_str!("patches/real-alias.after").replace("\r\n", "\n");
+  assert_eq!(
+    source.matches(&before).count(),
+    1,
+    "libfst real-alias correction no longer matches exactly once; review the upstream pin and patches"
+  );
+  let path = out_dir.join("fstapi.c");
+  fs::write(&path, source.replacen(&before, &after, 1))
+    .expect("failed to write corrected libfst source");
+  path
 }
