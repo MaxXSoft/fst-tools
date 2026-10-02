@@ -414,39 +414,10 @@ impl Hier<'_> {
   /// Copies the record and strings before libfst reuses its hierarchy storage.
   fn new(hier: &capi::fstHier) -> Self {
     match hier.htyp as capi::fstHierType {
-      capi::fstHierType_FST_HT_SCOPE => {
-        let scope = unsafe { &hier.u.scope };
-        Self::Scope(Scope {
-          ty: scope.typ as ScopeType,
-          name: unsafe { CStr::from_ptr(scope.name) }.to_owned(),
-          component: unsafe { CStr::from_ptr(scope.component) }.to_owned(),
-          phantom: PhantomData,
-        })
-      }
+      capi::fstHierType_FST_HT_SCOPE => Self::Scope(Scope::new(unsafe { &hier.u.scope })),
       capi::fstHierType_FST_HT_UPSCOPE => Self::Upscope,
-      capi::fstHierType_FST_HT_VAR => {
-        let var = unsafe { &hier.u.var };
-        Self::Var(Var {
-          ty: var.typ as VarType,
-          direction: var.direction as VarDir,
-          name: unsafe { CStr::from_ptr(var.name) }.to_owned(),
-          length: var.length,
-          handle: Handle::new(var.handle).expect("libfst returned a zero variable handle"),
-          is_alias: var.is_alias() != 0,
-          phantom: PhantomData,
-        })
-      }
-      capi::fstHierType_FST_HT_ATTRBEGIN => {
-        let attr = unsafe { &hier.u.attr };
-        Self::AttrBegin(Attr {
-          ty: attr.typ as AttrType,
-          subtype: attr.subtype as u32,
-          name: unsafe { CStr::from_ptr(attr.name) }.to_owned(),
-          arg: attr.arg,
-          arg_from_name: attr.arg_from_name,
-          phantom: PhantomData,
-        })
-      }
+      capi::fstHierType_FST_HT_VAR => Self::Var(Var::new(unsafe { &hier.u.var })),
+      capi::fstHierType_FST_HT_ATTRBEGIN => Self::AttrBegin(Attr::new(unsafe { &hier.u.attr })),
       capi::fstHierType_FST_HT_ATTREND => Self::AttrEnd,
       _ => unreachable!("libfst returned an unknown hierarchy type"),
     }
@@ -463,6 +434,16 @@ pub struct Scope<'a> {
 }
 
 impl Scope<'_> {
+  /// Copies a libfst scope record and its strings into owned storage.
+  fn new(scope: &capi::fstHier__bindgen_ty_1_fstHierScope) -> Self {
+    Self {
+      ty: scope.typ as ScopeType,
+      name: unsafe { CStr::from_ptr(scope.name) }.to_owned(),
+      component: unsafe { CStr::from_ptr(scope.component) }.to_owned(),
+      phantom: PhantomData,
+    }
+  }
+
   /// Returns scope type.
   pub fn ty(&self) -> ScopeType {
     self.ty
@@ -508,6 +489,19 @@ pub struct Var<'a> {
 }
 
 impl Var<'_> {
+  /// Copies a libfst variable record and its name into owned storage.
+  fn new(var: &capi::fstHier__bindgen_ty_1_fstHierVar) -> Self {
+    Self {
+      ty: var.typ as VarType,
+      direction: var.direction as VarDir,
+      name: unsafe { CStr::from_ptr(var.name) }.to_owned(),
+      length: var.length,
+      handle: Handle::new(var.handle).expect("libfst returned a zero variable handle"),
+      is_alias: var.is_alias() != 0,
+      phantom: PhantomData,
+    }
+  }
+
   /// Returns variable type.
   pub fn ty(&self) -> VarType {
     self.ty
@@ -559,6 +553,18 @@ pub struct Attr<'a> {
 }
 
 impl Attr<'_> {
+  /// Copies a libfst attribute record and its name into owned storage.
+  fn new(attr: &capi::fstHier__bindgen_ty_1_fstHierAttr) -> Self {
+    Self {
+      ty: attr.typ as AttrType,
+      subtype: attr.subtype as u32,
+      name: unsafe { CStr::from_ptr(attr.name) }.to_owned(),
+      arg: attr.arg,
+      arg_from_name: attr.arg_from_name,
+      phantom: PhantomData,
+    }
+  }
+
   /// Returns attribute type.
   pub fn ty(&self) -> AttrType {
     self.ty
