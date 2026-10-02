@@ -2,6 +2,7 @@ use crate::consts::{AttrType, FileType, ScopeType, VarDir, VarType, WriterPackTy
 use crate::types::Handle;
 use crate::utils::*;
 use crate::{Error, Result, capi, var_dir, var_type};
+use std::ffi::CStr;
 use std::os::raw;
 use std::path::Path;
 
@@ -13,6 +14,8 @@ pub struct Writer {
   /// Storage belongs to unique handles; aliases reuse an existing entry.
   variables: Vec<Variable>,
   value_bytes: u32,
+  /// Conservative encoded size of the current value-change section.
+  buffered_value_bytes: u32,
   last_time: Option<u64>,
 }
 
@@ -31,6 +34,7 @@ impl Writer {
         ctx,
         variables: Vec::new(),
         value_bytes: 0,
+        buffered_value_bytes: 1,
         last_time: None,
       })
     }
@@ -127,6 +131,20 @@ impl Writer {
   /// Sets attribute begin.
   pub fn set_attr_begin(&mut self, ty: AttrType, sub_ty: u32, name: &str, arg: u64) -> Result<()> {
     let name = name.into_cstring()?;
+    self.set_attr_begin_raw(ty, sub_ty, &name, arg)
+  }
+
+  /// Sets attribute begin, preserving names containing non-UTF-8 bytes.
+  ///
+  /// Some FST attributes encode binary integers in their nul-terminated names.
+  pub fn set_attr_begin_raw(
+    &mut self,
+    ty: AttrType,
+    sub_ty: u32,
+    name: &CStr,
+    arg: u64,
+  ) -> Result<()> {
+    self.check_status()?;
     unsafe { capi::fstWriterSetAttrBegin(self.ctx, ty, sub_ty as _, name.as_ptr(), arg) };
     Ok(())
   }
@@ -201,11 +219,14 @@ impl Writer {
   /// The byte length must exactly match the variable's storage width. Invalid
   /// input is rejected before calling libfst, without changing the waveform.
   /// Before the first explicit time change, the value is written at time zero.
+  /// The current section is limited to a conservative one-GiB encoded budget,
+  /// including 15 bytes per change, to protect libfst's 32-bit buffer arithmetic.
   pub fn emit_value_change(&mut self, handle: Handle, value: &[u8]) -> Result<()> {
     let variable = self.variable(handle)?;
     if variable.width == 0 || value.len() != variable.width as usize {
       return Err(Error::InvalidOperation);
     }
+    let next_value_bytes = checked_value_bytes(self.buffered_value_bytes, value.len())?;
     self.check_status()?;
     // Use a normal time-zero change instead of libfst's initial frame alone.
     // Otherwise an entirely static waveform can lose its value section when
@@ -216,17 +237,20 @@ impl Writer {
     unsafe {
       capi::fstWriterEmitValueChange(self.ctx, handle.into(), value.as_ptr().cast());
     }
+    self.buffered_value_bytes = next_value_bytes;
     self.check_status()
   }
 
   /// Emits variable-length value change for the given handle.
   ///
   /// Before the first explicit time change, the value is written at time zero.
+  /// The same section budget as [`Self::emit_value_change`] applies. Exceeding
+  /// it returns [`Error::InvalidOperation`] before changing the time or values.
   pub fn emit_var_len_value_change(&mut self, handle: Handle, value: &[u8]) -> Result<()> {
     if self.variable(handle)?.width != 0 {
       return Err(Error::InvalidOperation);
     }
-    let len = u32::try_from(value.len()).map_err(|_| Error::InvalidOperation)?;
+    let next_value_bytes = checked_value_bytes(self.buffered_value_bytes, value.len())?;
     self.check_status()?;
     // libfst has no initial frame for variable-length signals: initialize the
     // time chain first, or the first time change would discard this value.
@@ -238,9 +262,10 @@ impl Writer {
         self.ctx,
         handle.into(),
         value.as_ptr().cast(),
-        len,
+        value.len() as u32,
       );
     }
+    self.buffered_value_bytes = next_value_bytes;
     self.check_status()
   }
 
@@ -254,12 +279,40 @@ impl Writer {
       return Err(Error::InvalidOperation);
     }
     self.check_status()?;
+    // Large hierarchies raise libfst's automatic flush threshold beyond this
+    // wrapper's budget. Request an earlier section boundary while there is
+    // still headroom for the next timestamp's changes.
+    if self.buffered_value_bytes >= MAX_BUFFERED_VALUE_BYTES / 2 {
+      self.flush();
+    }
+    // A public flush request is deferred until a time change. Only reset the
+    // budget when that time change actually consumes the pending flush; the
+    // same query also detects libfst's automatic section-size threshold.
+    let flush_pending = unsafe { capi::fstWriterGetFlushContextPending(self.ctx) != 0 };
     unsafe { capi::fstWriterEmitTimeChange(self.ctx, time) };
+    if flush_pending {
+      self.buffered_value_bytes = 1;
+    }
     self.last_time = Some(time);
     self.check_status()
   }
 
-  /// Flushes the content of the current writer to file.
+  /// Records whether waveform dumping is active at the current timestamp.
+  ///
+  /// Before the first explicit time change, the activity is recorded at zero.
+  pub fn emit_dump_active(&mut self, enable: bool) -> Result<()> {
+    self.check_status()?;
+    if self.last_time.is_none() {
+      self.emit_time_change(0)?;
+    }
+    unsafe { capi::fstWriterEmitDumpActive(self.ctx, enable as raw::c_int) };
+    self.check_status()
+  }
+
+  /// Requests a flush on the next time change.
+  ///
+  /// libfst may ignore the request until several time changes have been emitted.
+  /// Requesting a flush alone does not reset the value-change section budget.
   pub fn flush(&mut self) {
     unsafe { capi::fstWriterFlushContext(self.ctx) }
   }
@@ -284,6 +337,22 @@ impl Writer {
       Ok(())
     }
   }
+}
+
+// Keep section payloads within one GiB, including record overhead. Upstream
+// stores buffer sizes and offsets in u32 and passes some lengths to signed-int
+// compression APIs. Its initial allocation is at most 2 GiB + 64 MiB. Growth
+// happens only below the needed size (at most 1 GiB) and adds at most one record
+// plus 64 MiB, so neither growth nor the record-offset calculations can wrap.
+const MAX_BUFFERED_VALUE_BYTES: u32 = 1 << 30;
+
+fn checked_value_bytes(buffered: u32, len: usize) -> Result<u32> {
+  let len = u32::try_from(len).map_err(|_| Error::InvalidOperation)?;
+  buffered
+    .checked_add(len)
+    .and_then(|size| size.checked_add(15))
+    .filter(|&size| size <= MAX_BUFFERED_VALUE_BYTES)
+    .ok_or(Error::InvalidOperation)
 }
 
 impl Drop for Writer {
@@ -319,5 +388,147 @@ impl Variable {
       width
     };
     Self { width, real }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  struct TestFile(std::path::PathBuf);
+
+  impl TestFile {
+    fn new(name: &str) -> Self {
+      // Keep fixtures beside the test executable, within Cargo's artifacts.
+      Self(
+        std::env::current_exe()
+          .unwrap()
+          .parent()
+          .unwrap()
+          .join(format!("fstapi-{name}-{}.fst", std::process::id())),
+      )
+    }
+  }
+
+  impl Drop for TestFile {
+    fn drop(&mut self) {
+      let _ = std::fs::remove_file(&self.0);
+    }
+  }
+
+  #[test]
+  fn value_change_budget_rejects_large_records_and_cumulative_overflow() {
+    assert_eq!(checked_value_bytes(1, 0), Ok(16));
+    assert_eq!(
+      checked_value_bytes(1, MAX_BUFFERED_VALUE_BYTES as usize - 16),
+      Ok(MAX_BUFFERED_VALUE_BYTES)
+    );
+    for (buffered, len) in [
+      (1, MAX_BUFFERED_VALUE_BYTES as usize - 15),
+      (1, u32::MAX as usize),
+      (MAX_BUFFERED_VALUE_BYTES - 14, 0),
+      (MAX_BUFFERED_VALUE_BYTES - 16, 2),
+    ] {
+      assert_eq!(
+        checked_value_bytes(buffered, len),
+        Err(Error::InvalidOperation)
+      );
+    }
+  }
+
+  #[test]
+  fn exhausted_budget_rejects_without_mutation_and_resets_only_after_flush() {
+    // Inject a full budget instead of allocating GiB-sized value buffers.
+    let file = TestFile::new("writer-budget");
+    let mut writer = Writer::create(&file.0, true).unwrap();
+    let bit = writer
+      .create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "bit", None)
+      .unwrap();
+    let string = writer
+      .create_var(var_type::GEN_STRING, var_dir::OUTPUT, 0, "string", None)
+      .unwrap();
+    writer.buffered_value_bytes = MAX_BUFFERED_VALUE_BYTES;
+    assert_eq!(
+      writer.emit_value_change(bit, b"1"),
+      Err(Error::InvalidOperation)
+    );
+    assert_eq!(
+      writer.emit_var_len_value_change(string, b"first"),
+      Err(Error::InvalidOperation)
+    );
+    assert_eq!(writer.last_time, None);
+    assert_eq!(writer.buffered_value_bytes, MAX_BUFFERED_VALUE_BYTES);
+
+    writer.buffered_value_bytes = 1;
+    writer.emit_value_change(bit, b"1").unwrap();
+    writer.emit_var_len_value_change(string, b"first").unwrap();
+    let budget_before_manual_flush = MAX_BUFFERED_VALUE_BYTES / 2 - 1;
+    writer.buffered_value_bytes = budget_before_manual_flush;
+    writer.emit_time_change(0).unwrap();
+    assert_eq!(writer.buffered_value_bytes, budget_before_manual_flush);
+    writer.emit_time_change(1).unwrap();
+    writer.emit_time_change(2).unwrap();
+    writer.flush();
+    assert_eq!(writer.buffered_value_bytes, budget_before_manual_flush);
+    writer.emit_time_change(3).unwrap();
+    assert_eq!(writer.buffered_value_bytes, 1);
+    writer.emit_value_change(bit, b"0").unwrap();
+    writer.emit_var_len_value_change(string, b"last").unwrap();
+    writer.emit_time_change(4).unwrap();
+    drop(writer);
+
+    let mut reader = crate::Reader::open(&file.0).unwrap();
+    reader.set_mask_all();
+    let mut values = Vec::new();
+    reader
+      .for_each_block(|time, handle, value, _| values.push((time, handle, value.to_vec())))
+      .unwrap();
+    // The second section can repeat a fixed-width checkpoint at its boundary.
+    assert!(values.contains(&(0, bit, b"1".to_vec())));
+    assert!(values.contains(&(0, string, b"first".to_vec())));
+    assert!(values.contains(&(3, bit, b"0".to_vec())));
+    assert!(values.contains(&(3, string, b"last".to_vec())));
+    assert_eq!(values.iter().filter(|(time, _, _)| *time == 0).count(), 2);
+  }
+
+  #[test]
+  fn time_changes_flush_large_budgets_when_the_engine_can_accept_the_request() {
+    let file = TestFile::new("writer-auto-budget");
+    let mut writer = Writer::create(&file.0, true).unwrap();
+    let bit = writer
+      .create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "bit", None)
+      .unwrap();
+    writer.emit_value_change(bit, b"0").unwrap();
+    writer.buffered_value_bytes = MAX_BUFFERED_VALUE_BYTES;
+
+    // At the first two subsequent time changes, libfst ignores flush requests.
+    // Do not reset the budget before its actual buffer is flushed.
+    for time in [1, 2] {
+      writer.emit_time_change(time).unwrap();
+      assert_eq!(writer.buffered_value_bytes, MAX_BUFFERED_VALUE_BYTES);
+      assert_eq!(
+        writer.emit_value_change(bit, b"1"),
+        Err(Error::InvalidOperation)
+      );
+    }
+    writer.emit_time_change(3).unwrap();
+    assert_eq!(writer.buffered_value_bytes, 1);
+    writer.emit_value_change(bit, b"1").unwrap();
+    writer.emit_time_change(4).unwrap();
+    drop(writer);
+
+    let mut reader = crate::Reader::open(&file.0).unwrap();
+    reader.set_mask_all();
+    let mut values = Vec::new();
+    reader
+      .for_each_block(|time, _, value, _| values.push((time, value.to_vec())))
+      .unwrap();
+    assert!(values.contains(&(0, b"0".to_vec())));
+    assert!(values.contains(&(3, b"1".to_vec())));
+    assert!(
+      !values
+        .iter()
+        .any(|(time, value)| *time < 3 && value == b"1")
+    );
   }
 }

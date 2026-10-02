@@ -114,6 +114,24 @@ impl Reader {
     unsafe { capi::fstReaderGetTimezero(self.ctx) }
   }
 
+  /// Returns all dump activity transitions as `(time, active)` pairs.
+  ///
+  /// An inactive interval means waveform recording was disabled, rather than
+  /// that the signals retained their previous values. Entries retain file order,
+  /// including transitions at equal timestamps. Process masks and time range
+  /// limits do not filter this metadata.
+  pub fn dump_activity(&self) -> Vec<(u64, bool)> {
+    let count = unsafe { capi::fstReaderGetNumberDumpActivityChanges(self.ctx) };
+    (0..count)
+      .map(|index| unsafe {
+        (
+          capi::fstReaderGetDumpActivityChangeTime(self.ctx, index),
+          capi::fstReaderGetDumpActivityChangeValue(self.ctx, index) != 0,
+        )
+      })
+      .collect()
+  }
+
   /// Returns process mask for the facility of the given handle.
   pub fn mask(&self, handle: Handle) -> bool {
     unsafe { capi::fstReaderGetFacProcessMask(self.ctx, handle.into()) != 0 }
@@ -293,6 +311,10 @@ impl Reader {
   ///
   /// Enables the process mask for every facility. Existing time range limits
   /// remain in effect.
+  ///
+  /// Until the pinned libfst's real-alias table overflow is fixed upstream,
+  /// hierarchies with a real alias immediately after 65,536 (or a doubled table
+  /// capacity of) unique handles are rejected before opening the output file.
   pub fn dump_as_vcd<P>(&mut self, path: Option<P>) -> Result<()>
   where
     P: AsRef<Path>,
@@ -590,12 +612,20 @@ impl Attr<'_> {
     self.subtype
   }
 
-  /// Returns attribute name.
+  /// Returns attribute name as UTF-8 text.
+  ///
+  /// Source stem attributes encode a binary integer in this field; use
+  /// [`Self::arg_from_name`] to decode it or [`Self::name_cstr`] to copy it.
   pub fn name(&self) -> Result<&str> {
     self
       .name
       .to_str()
       .map_err(|e| Error::InvalidUtf8Str(Some(e)))
+  }
+
+  /// Returns the attribute name without requiring UTF-8 encoding.
+  pub fn name_cstr(&self) -> &CStr {
+    &self.name
   }
 
   /// Returns attribute name as a C string, valid until this attribute is dropped.

@@ -34,12 +34,30 @@ Keep upstream files unchanged. Local responsibilities are:
   a change at that timestamp, including successive changes at time zero. This
   preserves static initial values and initial strings that the old wrapper
   could lose. A null `date_raw` leaves the date unchanged.
+  Value changes also consume a conservative one-GiB budget per section,
+  including record overhead, to keep libfst's 32-bit buffer calculations and
+  signed compression lengths in range. The budget resets when a time change
+  consumes an automatic or requested flush; requesting a flush alone does not
+  reset it. At 512 MiB of budget usage, time changes proactively request a flush
+  so long traces can continue in smaller sections. This is a per-section limit,
+  not a limit on the total FST file size. Oversized changes return
+  `InvalidOperation` without emitting them.
+  Raw C-string attributes preserve binary source indices, and dump activity
+  can be emitted independently of signal values.
 * `src/reader.rs`: own hierarchy records instead of retaining references into
   libfst's reused storage; recover callback lengths using per-handle metadata
   and native-double mode; catch callback panics until the C traversal returns.
+  Expose raw attribute bytes and all dump activity transitions for lossless
+  metadata copying, independently of signal masks and time limits.
 * `csrc/fst_tools.c`: manage C `FILE *` for VCD export. Hierarchy processing
   clears libfst's process mask, so export explicitly enables every signal before
   writing values. The shim checks stream and close/flush errors.
+  It also preflights the hierarchy for the pinned engine's real-alias overflow:
+  a real alias at exactly 65,536 unique handles, or any doubled table capacity,
+  returns `InvalidOperation` before the output file is opened. This deliberately
+  limits VCD export for that shape of otherwise valid FST file; ordinary reading
+  and clipping remain available. Remove the preflight after incorporating an
+  upstream fix, retaining its boundary regression tests.
 
 The public Rust `Result` DOES NOT promise recovery from every C failure.
 libfst still has fatal internal error paths, and its `void` close operation
@@ -54,6 +72,7 @@ CANNOT report all write failures through Rust's `Drop`.
 
    ```sh
    cargo fmt --all --check
+   clang-format --dry-run --Werror fstapi/csrc/*.c fstapi/csrc/*.h
    cargo clippy --workspace --all-targets --all-features -- -D warnings
    cargo test --workspace
    cargo package -p fstapi --list
@@ -80,6 +99,8 @@ real and string values, aliases, EVCD ports, masks, time ranges, invalid input,
 initial values, VCD output, retained hierarchy data, and callback panics.
 Each CLI has integration tests using generated waveforms. Large simulator traces
 and external simulation sources are validation inputs, not repository fixtures.
+The C adapter formatting check runs only on the Linux CI job. Upstream C sources
+are excluded from that check and retain their original formatting.
 
 The Rust wrapper is MIT OR Apache-2.0; libfst and its bundled compression code
 retain their own notices in `third_party/libfst/LICENSE` and the source headers.
