@@ -26,6 +26,4 @@ include = [
 [build-dependencies]
 bindgen = "0.72.1"
 cc = { version = "1.2.41", features = ["parallel"] }
-
-[target.'cfg(windows)'.build-dependencies]
 vcpkg = "0.2.15"

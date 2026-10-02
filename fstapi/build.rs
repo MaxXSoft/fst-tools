@@ -7,8 +7,12 @@ fn main() {
     "libfst sources are missing; run `git submodule update --init --recursive`"
   );
 
-  #[cfg(windows)]
-  let (zlib_include_dir, mman_include_dir) = {
+  // Build scripts run on the host, so use Cargo's target configuration.
+  let target_family = env::var("CARGO_CFG_TARGET_FAMILY").unwrap_or_default();
+  let is_windows = target_family.split(',').any(|family| family == "windows");
+  let is_unix = target_family.split(',').any(|family| family == "unix");
+
+  let windows_includes = if is_windows {
     // Find zlib via vcpkg.
     let zlib = vcpkg::Config::new()
       .emit_includes(true)
@@ -26,7 +30,9 @@ fn main() {
     let mman_base_path = mman.include_paths[0].clone();
     let mman_include_dir = mman_base_path.join(PathBuf::from("mman"));
 
-    (zlib_include_dir, mman_include_dir)
+    Some((zlib_include_dir, mman_include_dir))
+  } else {
+    None
   };
 
   // Compile C sources to library.
@@ -40,12 +46,12 @@ fn main() {
     .include("csrc")
     .flag_if_supported("-Wno-unused-but-set-variable");
 
-  let target_family = env::var("CARGO_CFG_TARGET_FAMILY").unwrap_or_default();
-  if target_family == "unix" {
+  if is_unix {
     cc_build
       .define("HAVE_FSEEKO", None)
       .define("HAVE_REALPATH", None);
   }
+
   // The upstream Windows header supplies other CRT mappings, but these
   // large-file functions need explicit mappings for MSVC (not MinGW).
   if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
@@ -54,10 +60,9 @@ fn main() {
       .define("ftello", Some("_ftelli64"));
   }
 
-  #[cfg(windows)]
-  cc_build
-    .include(&zlib_include_dir)
-    .include(&mman_include_dir);
+  if let Some((zlib_include_dir, mman_include_dir)) = &windows_includes {
+    cc_build.include(zlib_include_dir).include(mman_include_dir);
+  }
 
   cc_build.compile("fst");
 
@@ -66,14 +71,15 @@ fn main() {
   println!("cargo:rerun-if-changed=vendor/libfst/src");
 
   // Link with zlib.
-  #[cfg(not(windows))]
-  println!("cargo:rustc-link-lib=z");
-  if target_family == "unix" {
+  if !is_windows {
+    println!("cargo:rustc-link-lib=z");
+  }
+  if is_unix {
     println!("cargo:rustc-link-lib=pthread");
   }
 
   // Generate bindings.
-  let bindgen_builder = bindgen::Builder::default()
+  let mut bindgen_builder = bindgen::Builder::default()
     .header("csrc/fst_tools.h")
     .allowlist_type(r#"(fst|FST_)\w+"#)
     .allowlist_function(r#"(fst|FST_)\w+"#)
@@ -81,8 +87,9 @@ fn main() {
     .clang_arg("-Icsrc")
     .clang_arg("-Ivendor/libfst/src");
 
-  #[cfg(windows)]
-  let bindgen_builder = bindgen_builder.clang_arg(format!("-I{}", zlib_include_dir.display()));
+  if let Some((zlib_include_dir, _)) = &windows_includes {
+    bindgen_builder = bindgen_builder.clang_arg(format!("-I{}", zlib_include_dir.display()));
+  }
 
   let bindings = bindgen_builder
     .generate()
