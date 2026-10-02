@@ -16,32 +16,6 @@ pub struct Writer {
   last_time: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Variable {
-  width: u32,
-  real: bool,
-}
-
-impl Variable {
-  fn new(ty: VarType, width: u32) -> Self {
-    let real = matches!(
-      ty,
-      var_type::VCD_REAL
-        | var_type::VCD_REAL_PARAMETER
-        | var_type::VCD_REALTIME
-        | var_type::SV_SHORTREAL
-    );
-    let width = if real {
-      8
-    } else if ty == var_type::GEN_STRING {
-      0
-    } else {
-      width
-    };
-    Self { width, real }
-  }
-}
-
 impl Writer {
   /// Creates a new [`Writer`], writes the output waveform to the given path.
   pub fn create<P>(path: P, use_compressed_hier: bool) -> Result<Self>
@@ -313,5 +287,31 @@ impl Writer {
 impl Drop for Writer {
   fn drop(&mut self) {
     unsafe { capi::fstWriterClose(self.ctx) }
+  }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Variable {
+  width: u32,
+  real: bool,
+}
+
+impl Variable {
+  fn new(ty: VarType, width: u32) -> Self {
+    let real = matches!(
+      ty,
+      var_type::VCD_REAL
+        | var_type::VCD_REAL_PARAMETER
+        | var_type::VCD_REALTIME
+        | var_type::SV_SHORTREAL
+    );
+    let width = if real {
+      8
+    } else if ty == var_type::GEN_STRING {
+      0
+    } else {
+      width
+    };
+    Self { width, real }
   }
 }

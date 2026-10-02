@@ -410,7 +410,7 @@ pub enum Hier<'a> {
   AttrEnd,
 }
 
-impl<'a> Hier<'a> {
+impl Hier<'_> {
   /// Copies the record and strings before libfst reuses its hierarchy storage.
   fn new(hier: &capi::fstHier) -> Self {
     match hier.htyp as capi::fstHierType {
