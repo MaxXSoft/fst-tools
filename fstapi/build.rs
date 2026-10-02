@@ -44,7 +44,8 @@ fn main() {
     .define("FST_WRITER_PARALLEL", None)
     .include(&upstream)
     .include("csrc")
-    .flag_if_supported("-Wno-unused-but-set-variable");
+    .flag_if_supported("-Wno-unused-but-set-variable")
+    .flag_if_supported("-Wno-gnu-folding-constant");
 
   if is_unix {
     cc_build
