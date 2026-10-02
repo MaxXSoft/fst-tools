@@ -316,13 +316,20 @@ impl Drop for Reader {
   }
 }
 
+/// Value encoding used to determine the byte length of a signal's callbacks.
 #[derive(Clone, Copy, Debug)]
 enum SignalValueKind {
+  /// A value with a fixed byte length.
   Fixed(usize),
+  /// A real value delivered as text or an eight-byte native double.
   Real,
+  /// A value whose byte length is supplied by the variable-length callback.
   Variable,
 }
 
+/// State shared by libfst callbacks during a block traversal.
+///
+/// Saves panics and invalid-value errors for handling after the C call returns.
 struct BlockCallback<'a, F> {
   callback: &'a mut F,
   signal_values: &'a [SignalValueKind],
@@ -335,6 +342,9 @@ impl<F> BlockCallback<'_, F>
 where
   F: FnMut(u64, Handle, &[u8], bool),
 {
+  /// Validates and delivers a value, catching panics before they cross into C.
+  ///
+  /// Further values are skipped after the first panic or invalid value.
   fn invoke(&mut self, time: u64, handle: u32, value: *const u8, var_len: Option<u32>) {
     if self.panic.is_some() || self.invalid_value {
       return;

@@ -7,9 +7,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
 
+/// An isolated test directory under Cargo's temporary directory, removed on drop.
 pub struct TestDir(PathBuf);
 
 impl TestDir {
+  /// Creates a directory unique to this process and invocation.
   pub fn new() -> Self {
     let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
       "fstapi-{}-{}",
@@ -20,6 +22,7 @@ impl TestDir {
     Self(path)
   }
 
+  /// Returns the path of a named file within this test directory.
   pub fn path(&self, name: &str) -> PathBuf {
     self.0.join(name)
   }
@@ -31,14 +34,20 @@ impl Drop for TestDir {
   }
 }
 
+/// An owned value-change event that can be sorted for deterministic comparisons.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Event {
+  /// Timestamp in the waveform's time units.
   pub time: u64,
+  /// Handle of the signal whose value changed.
   pub handle: Handle,
+  /// Bytes copied from the reader callback.
   pub value: Vec<u8>,
+  /// Whether the value came from the variable-length callback.
   pub variable_length: bool,
 }
 
+/// Collects and sorts events using the reader's current masks and time limits.
 pub fn events(reader: &mut Reader) -> Vec<Event> {
   let mut events = Vec::new();
   reader
@@ -55,6 +64,10 @@ pub fn events(reader: &mut Reader) -> Vec<Event> {
   events
 }
 
+/// Writes a round-trip fixture using the requested compression and repack options.
+///
+/// Returns the vector, real, string, and EVCD port handles, in that order.
+/// The fixture also includes nested scopes and an alias of the vector.
 pub fn fixture(
   path: &Path,
   pack: fstapi::WriterPackType,
@@ -122,6 +135,9 @@ pub fn fixture(
   [vector, real, string, port]
 }
 
+/// Returns sorted fixture events with real values encoded for the callback mode.
+///
+/// Handles must be in the order returned by [`fixture`].
 pub fn expected_events(handles: [Handle; 4], native_doubles: bool) -> Vec<Event> {
   let mut expected = Vec::new();
   for (time, vector, real, string, port) in [

@@ -264,6 +264,7 @@ impl Writer {
     unsafe { capi::fstWriterFlushContext(self.ctx) }
   }
 
+  /// Returns storage metadata for a handle, rejecting handles outside the table.
   fn variable(&self, handle: Handle) -> Result<Variable> {
     self
       .variables
@@ -272,6 +273,7 @@ impl Writer {
       .ok_or(Error::InvalidOperation)
   }
 
+  /// Reports a reached dump-size limit or seek failure from libfst's status flags.
   fn check_status(&self) -> Result<()> {
     if unsafe {
       capi::fstWriterGetDumpSizeLimitReached(self.ctx) != 0
@@ -290,13 +292,17 @@ impl Drop for Writer {
   }
 }
 
+/// Normalized storage metadata used to validate value lengths and aliases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Variable {
+  /// Storage width in bytes, or zero for variable-length values.
   width: u32,
+  /// Whether values use the native-double representation.
   real: bool,
 }
 
 impl Variable {
+  /// Normalizes real values to eight bytes and generic strings to variable length.
   fn new(ty: VarType, width: u32) -> Self {
     let real = matches!(
       ty,
