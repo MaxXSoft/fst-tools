@@ -3,8 +3,8 @@
 The FST implementation is based on the unmodified
 [gtkwave/libfst](https://github.com/gtkwave/libfst) Git submodule at
 `third_party/libfst`. The submodule gitlink is the authoritative revision; builds
-do not fetch or follow the upstream branch. One reviewed compatibility correction
-is applied to a build-local source copy, as described below.
+do not fetch or follow the upstream branch. Two reviewed compatibility corrections
+are applied to a build-local source copy, as described below.
 
 Initialize a source checkout before building:
 
@@ -33,16 +33,26 @@ The alias already refers to an existing facility, so the assignment is redundant
 This function is used both by VCD export and by opening zero-duration files;
 a VCD-only preflight cannot protect all callers.
 
-`patches/real-alias.patch` records the single-line removal as a standard unified
-diff, with paths relative to `third_party/libfst`. The build script normalizes
-checkout line endings and uses the Rust `diffy` crate to parse and apply the patch
-to `OUT_DIR/fstapi.c`; no external patch command is required. All context lines
-must match, although line offsets may change. The context includes the alias
-branch so the similar assignment for non-alias variables cannot match instead.
-An invalid patch, a missing or extra hunk, or a context mismatch fails the build.
-The patch is included in published crates. The submodule and public C ABI remain
-unchanged. Remove the correction when the fix is available in the reviewed
-upstream pin, retaining the open/read/export boundary regressions.
+`patches/real-alias.patch` records the single-line removal. Its context includes
+the alias branch so the similar assignment for non-alias variables cannot match
+instead. Retain the open/read/export boundary regressions when updating this fix.
+
+The pinned engine also uses local `const int` values as array bounds in
+`fstReaderVarint32`, `fstReaderVarint32WithSkip`, and `fstReaderVarint64`.
+These are variable-length arrays in C, which MSVC does not support.
+`patches/msvc-varint.patch` changes the three declarations to enum constants,
+preserving the 5-, 5-, and 16-byte buffers, read limits, and TALOS-2023-1783 checks.
+
+Both patches are standard unified diffs with paths relative to
+`third_party/libfst`. The build script normalizes checkout line endings and uses
+the Rust `diffy` crate to apply both patches, in the listed order, to
+`OUT_DIR/fstapi.c` on every target; no external patch command is required.
+All context lines must match, although line offsets may change. An invalid patch,
+an unexpected hunk count (one for real-alias, three for MSVC), or a context
+mismatch fails the build and identifies the patch.
+Both patches are included in published crates. The submodule and public C ABI
+remain unchanged. Remove each correction when its fix is available in the
+reviewed upstream pin.
 
 Keep upstream files unchanged. Local responsibilities are:
 
@@ -101,8 +111,8 @@ CANNOT report all write failures through Rust's `Drop`.
 5. Commit the gitlink update with any necessary wrapper changes and record the
    upstream revision and validation in the commit description.
 
-Actual engine fixes should be proposed upstream. The documented real-alias
-correction is the sole build-time exception; do not silently edit the submodule,
+Actual engine fixes should be proposed upstream. The two documented corrections
+are the only build-time exceptions; do not silently edit the submodule,
 add undisclosed corrections, or fetch sources during a Cargo build.
 
 ## Tests
@@ -115,6 +125,9 @@ Each CLI has integration tests using generated waveforms. Large simulator traces
 and external simulation sources are validation inputs, not repository fixtures.
 The C adapter formatting check runs only on the Linux CI job. Upstream C sources
 are excluded from that check and retain their original formatting.
+Linux CI also builds the C sources with GCC and `-Werror=vla` to catch MSVC
+portability regressions. The Windows CI job continues to build, test, and verify
+the packaged crate with the default MSVC toolchain.
 
 The Rust wrapper is MIT OR Apache-2.0; libfst and its bundled compression code
 retain their own notices in `third_party/libfst/LICENSE` and the source headers.

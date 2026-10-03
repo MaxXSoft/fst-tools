@@ -47,8 +47,7 @@ fn main() {
     .define("FST_WRITER_PARALLEL", None)
     .include(&upstream)
     .include("csrc")
-    .flag_if_supported("-Wno-unused-but-set-variable")
-    .flag_if_supported("-Wno-gnu-folding-constant");
+    .flag_if_supported("-Wno-unused-but-set-variable");
 
   if is_unix {
     cc_build
@@ -107,24 +106,41 @@ fn main() {
     .expect("failed to write bindings");
 }
 
-/// Apply the reviewed single-hunk compatibility correction to a build-local
-/// copy. An upstream update must explicitly review/remove the correction if
-/// its exact context changes; the checked-in submodule is never modified.
+/// Apply the reviewed compatibility corrections to a build-local copy.
+/// An upstream update must explicitly review/remove any correction whose
+/// context changes; the checked-in submodule is never modified.
 fn patched_fst_source(upstream: &Path, out_dir: &Path) -> PathBuf {
-  let source = fs::read_to_string(upstream.join("fstapi.c"))
+  let mut source = fs::read_to_string(upstream.join("fstapi.c"))
     .expect("failed to read libfst source")
     .replace("\r\n", "\n");
-  let patch = include_str!("patches/real-alias.patch").replace("\r\n", "\n");
-  let patch = diffy::Patch::from_str(&patch).expect("invalid libfst real-alias patch");
-  assert_eq!(
-    patch.hunks().len(),
-    1,
-    "libfst real-alias patch must contain exactly one hunk"
-  );
-  let corrected = diffy::apply(&source, &patch).expect(
-    "failed to apply libfst real-alias patch; review the upstream pin and patches/real-alias.patch",
-  );
+  let patches = [
+    (
+      "real-alias.patch",
+      include_str!("patches/real-alias.patch"),
+      1,
+    ),
+    (
+      "msvc-varint.patch",
+      include_str!("patches/msvc-varint.patch"),
+      3,
+    ),
+  ];
+  for (name, contents, expected_hunks) in patches {
+    let contents = contents.replace("\r\n", "\n");
+    let patch = diffy::Patch::from_str(&contents)
+      .unwrap_or_else(|error| panic!("invalid libfst patch {name}: {error}"));
+    assert_eq!(
+      patch.hunks().len(),
+      expected_hunks,
+      "libfst patch {name} must contain exactly {expected_hunks} hunks"
+    );
+    source = diffy::apply(&source, &patch).unwrap_or_else(|error| {
+      panic!(
+        "failed to apply libfst patch {name}: {error}; review the upstream pin and patches/{name}"
+      )
+    });
+  }
   let path = out_dir.join("fstapi.c");
-  fs::write(&path, corrected).expect("failed to write corrected libfst source");
+  fs::write(&path, source).expect("failed to write corrected libfst source");
   path
 }

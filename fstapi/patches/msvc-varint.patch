@@ -1,0 +1,29 @@
+--- a/src/fstapi.c
++++ b/src/fstapi.c
+@@ -506,7 +506,7 @@
+ 
+ static uint32_t fstReaderVarint32(FILE *f)
+ {
+-    const int chk_len_max = 5; /* TALOS-2023-1783 */
++    enum { chk_len_max = 5 }; /* TALOS-2023-1783 */
+     int chk_len = chk_len_max;
+     unsigned char buf[chk_len_max];
+     unsigned char *mem = buf;
+@@ -536,7 +536,7 @@
+ 
+ static uint32_t fstReaderVarint32WithSkip(FILE *f, uint32_t *skiplen)
+ {
+-    const int chk_len_max = 5; /* TALOS-2023-1783 */
++    enum { chk_len_max = 5 }; /* TALOS-2023-1783 */
+     int chk_len = chk_len_max;
+     unsigned char buf[chk_len_max];
+     unsigned char *mem = buf;
+@@ -567,7 +567,7 @@
+ 
+ static uint64_t fstReaderVarint64(FILE *f)
+ {
+-    const int chk_len_max = 16; /* TALOS-2023-1783 */
++    enum { chk_len_max = 16 }; /* TALOS-2023-1783 */
+     int chk_len = chk_len_max;
+     unsigned char buf[chk_len_max];
+     unsigned char *mem = buf;
