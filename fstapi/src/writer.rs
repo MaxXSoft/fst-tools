@@ -442,27 +442,7 @@ impl Variable {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  struct TestFile(std::path::PathBuf);
-
-  impl TestFile {
-    fn new(name: &str) -> Self {
-      // Keep fixtures beside the test executable, within Cargo's artifacts.
-      Self(
-        std::env::current_exe()
-          .unwrap()
-          .parent()
-          .unwrap()
-          .join(format!("fstapi-{name}-{}.fst", std::process::id())),
-      )
-    }
-  }
-
-  impl Drop for TestFile {
-    fn drop(&mut self) {
-      let _ = std::fs::remove_file(&self.0);
-    }
-  }
+  use crate::test_temp_dir::TestDir;
 
   #[test]
   fn value_change_budget_rejects_large_records_and_cumulative_overflow() {
@@ -504,8 +484,9 @@ mod tests {
 
   #[test]
   fn frame_limit_rejects_before_creating_a_variable() {
-    let file = TestFile::new("writer-frame-budget");
-    let mut writer = Writer::create(&file.0, true).unwrap();
+    let dir = TestDir::new();
+    let file = dir.path("writer-frame-budget.fst");
+    let mut writer = Writer::create(&file, true).unwrap();
     // Exercise frame-offset overflow without allocating a multi-GiB frame.
     writer.value_bytes = u32::MAX;
     assert_eq!(
@@ -526,15 +507,16 @@ mod tests {
     writer.emit_value_change(bit, b"1").unwrap();
     writer.emit_time_change(1).unwrap();
     drop(writer);
-    let reader = crate::Reader::open(&file.0).unwrap();
+    let reader = crate::Reader::open(&file).unwrap();
     assert_eq!(reader.var_count(), 1);
   }
 
   #[test]
   fn exhausted_budget_rejects_without_mutation_and_resets_only_after_flush() {
     // Inject a full budget instead of allocating GiB-sized value buffers.
-    let file = TestFile::new("writer-budget");
-    let mut writer = Writer::create(&file.0, true).unwrap();
+    let dir = TestDir::new();
+    let file = dir.path("writer-budget.fst");
+    let mut writer = Writer::create(&file, true).unwrap();
     let bit = writer
       .create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "bit", None)
       .unwrap();
@@ -579,7 +561,7 @@ mod tests {
     writer.emit_time_change(4).unwrap();
     drop(writer);
 
-    let mut reader = crate::Reader::open(&file.0).unwrap();
+    let mut reader = crate::Reader::open(&file).unwrap();
     reader.set_mask_all();
     let mut values = Vec::new();
     reader
@@ -595,8 +577,9 @@ mod tests {
 
   #[test]
   fn time_changes_flush_large_budgets_when_the_engine_can_accept_the_request() {
-    let file = TestFile::new("writer-auto-budget");
-    let mut writer = Writer::create(&file.0, true).unwrap();
+    let dir = TestDir::new();
+    let file = dir.path("writer-auto-budget.fst");
+    let mut writer = Writer::create(&file, true).unwrap();
     let bit = writer
       .create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "bit", None)
       .unwrap();
@@ -623,7 +606,7 @@ mod tests {
     writer.emit_time_change(4).unwrap();
     drop(writer);
 
-    let mut reader = crate::Reader::open(&file.0).unwrap();
+    let mut reader = crate::Reader::open(&file).unwrap();
     reader.set_mask_all();
     let mut values = Vec::new();
     reader

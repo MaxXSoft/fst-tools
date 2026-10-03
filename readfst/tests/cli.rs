@@ -1,23 +1,17 @@
 use fstapi::{Writer, attr_type, misc_type, scope_type, var_dir, var_type};
 use std::ffi::CString;
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
+use tempfile::TempDir;
 
-struct Fixture(PathBuf);
-
-impl Drop for Fixture {
-  fn drop(&mut self) {
-    let _ = fs::remove_dir_all(&self.0);
-  }
+fn test_dir() -> TempDir {
+  let test_binary = std::env::current_exe().unwrap();
+  tempfile::tempdir_in(test_binary.parent().unwrap()).unwrap()
 }
 
 #[test]
 fn displays_metadata_hierarchy_attributes_and_aliases() {
-  let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("readfst-{}", std::process::id()));
-  fs::create_dir_all(&dir).unwrap();
-  let fixture = Fixture(dir);
-  let path = fixture.0.join("input.fst");
+  let dir = test_dir();
+  let path = dir.path().join("input.fst");
   let mut writer = Writer::create(&path, true)
     .unwrap()
     .version("readfst regression")
@@ -73,7 +67,7 @@ fn displays_metadata_hierarchy_attributes_and_aliases() {
   );
 
   let missing = Command::new(env!("CARGO_BIN_EXE_readfst"))
-    .arg(fixture.0.join("missing.fst"))
+    .arg(dir.path().join("missing.fst"))
     .arg("--all")
     .output()
     .unwrap();
@@ -82,11 +76,8 @@ fn displays_metadata_hierarchy_attributes_and_aliases() {
 
 #[test]
 fn displays_system_verilog_array_scope() {
-  let dir =
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("readfst-array-{}", std::process::id()));
-  fs::create_dir_all(&dir).unwrap();
-  let fixture = Fixture(dir);
-  let path = fixture.0.join("array.fst");
+  let dir = test_dir();
+  let path = dir.path().join("array.fst");
   let mut writer = Writer::create(&path, true).unwrap();
   writer
     .set_scope(scope_type::VCD_MODULE, "top", "top")
@@ -121,11 +112,8 @@ fn displays_system_verilog_array_scope() {
 
 #[test]
 fn displays_empty_variable_table_without_aliases() {
-  let dir =
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("readfst-empty-{}", std::process::id()));
-  fs::create_dir_all(&dir).unwrap();
-  let fixture = Fixture(dir);
-  let path = fixture.0.join("empty.fst");
+  let dir = test_dir();
+  let path = dir.path().join("empty.fst");
   let mut writer = Writer::create(&path, true).unwrap();
   writer.emit_time_change(0).unwrap();
   writer.emit_time_change(10).unwrap();
@@ -153,11 +141,8 @@ fn displays_empty_variable_table_without_aliases() {
 
 #[test]
 fn displays_binary_source_stem_attribute_arguments() {
-  let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
-    .join(format!("readfst-source-stem-{}", std::process::id()));
-  fs::create_dir_all(&dir).unwrap();
-  let fixture = Fixture(dir);
-  let path = fixture.0.join("sources.fst");
+  let dir = test_dir();
+  let path = dir.path().join("sources.fst");
   let mut writer = Writer::create(&path, true).unwrap();
   for (subtype, source, line) in [
     (misc_type::SOURCESTEM, 128, 300),

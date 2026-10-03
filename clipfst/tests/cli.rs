@@ -3,24 +3,18 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
+use tempfile::TempDir;
 
 struct Fixture {
-  dir: PathBuf,
+  dir: TempDir,
   input: PathBuf,
 }
 
 impl Fixture {
   fn empty() -> Self {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-      "clipfst-{}-{}",
-      std::process::id(),
-      NEXT_DIR.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::create_dir_all(&dir).unwrap();
-    let input = dir.join("input.fst");
+    let test_binary = std::env::current_exe().unwrap();
+    let dir = tempfile::tempdir_in(test_binary.parent().unwrap()).unwrap();
+    let input = dir.path().join("input.fst");
     Self { dir, input }
   }
 
@@ -70,7 +64,7 @@ impl Fixture {
   }
 
   fn clip(&self, name: &str, args: &[&str]) -> PathBuf {
-    let output = self.dir.join(name);
+    let output = self.dir.path().join(name);
     let result = Command::new(env!("CARGO_BIN_EXE_clipfst"))
       .arg(&self.input)
       .arg(&output)
@@ -83,12 +77,6 @@ impl Fixture {
       String::from_utf8_lossy(&result.stderr)
     );
     output
-  }
-}
-
-impl Drop for Fixture {
-  fn drop(&mut self) {
-    let _ = fs::remove_dir_all(&self.dir);
   }
 }
 
@@ -279,7 +267,7 @@ fn invalid_windows_and_missing_signals_report_failure() {
   for args in [vec!["--start", "15", "--end", "5"], vec!["-S", "^missing$"]] {
     let result = Command::new(env!("CARGO_BIN_EXE_clipfst"))
       .arg(&fixture.input)
-      .arg(fixture.dir.join("invalid.fst"))
+      .arg(fixture.dir.path().join("invalid.fst"))
       .args(&args)
       .output()
       .unwrap();
@@ -299,20 +287,20 @@ fn failed_in_place_selection_preserves_input_without_extra_files() {
     .unwrap();
   assert!(!result.status.success());
   assert_eq!(fs::read(&fixture.input).unwrap(), original);
-  assert_eq!(fs::read_dir(&fixture.dir).unwrap().count(), 1);
+  assert_eq!(fs::read_dir(fixture.dir.path()).unwrap().count(), 1);
 }
 
 #[test]
 fn rejects_input_aliases_before_creating_output() {
   let fixture = Fixture::new();
   let original = fs::read(&fixture.input).unwrap();
-  let hardlink = fixture.dir.join("hardlink.fst");
+  let hardlink = fixture.dir.path().join("hardlink.fst");
   fs::hard_link(&fixture.input, &hardlink).unwrap();
   let outputs = vec![fixture.input.clone(), hardlink];
   #[cfg(unix)]
   let outputs = {
     let mut outputs = outputs;
-    let symlink = fixture.dir.join("symlink.fst");
+    let symlink = fixture.dir.path().join("symlink.fst");
     std::os::unix::fs::symlink(&fixture.input, &symlink).unwrap();
     outputs.push(symlink);
     outputs

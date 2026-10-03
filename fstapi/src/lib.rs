@@ -65,6 +65,10 @@ mod types;
 mod utils;
 mod writer;
 
+#[cfg(test)]
+#[path = "../tests/common/temp_dir.rs"]
+mod test_temp_dir;
+
 pub use consts::*;
 pub use errors::*;
 pub use reader::*;

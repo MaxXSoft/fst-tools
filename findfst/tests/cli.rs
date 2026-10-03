@@ -1,22 +1,16 @@
 use fstapi::{Writer, scope_type, var_dir, var_type};
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
+use tempfile::TempDir;
 
-struct Fixture(PathBuf);
-
-impl Drop for Fixture {
-  fn drop(&mut self) {
-    let _ = fs::remove_dir_all(&self.0);
-  }
+fn test_dir() -> TempDir {
+  let test_binary = std::env::current_exe().unwrap();
+  tempfile::tempdir_in(test_binary.parent().unwrap()).unwrap()
 }
 
 #[test]
 fn finds_exact_hex_regex_and_alias_filtered_values() {
-  let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("findfst-{}", std::process::id()));
-  fs::create_dir_all(&dir).unwrap();
-  let fixture = Fixture(dir);
-  let path = fixture.0.join("input.fst");
+  let dir = test_dir();
+  let path = dir.path().join("input.fst");
   let mut writer = Writer::create(&path, true).unwrap();
   writer
     .set_scope(scope_type::VCD_MODULE, "top", "top")
@@ -78,11 +72,8 @@ fn finds_exact_hex_regex_and_alias_filtered_values() {
 
 #[test]
 fn hex_regex_skips_unknown_states_without_consuming_first_match() {
-  let dir =
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("findfst-unknown-{}", std::process::id()));
-  fs::create_dir_all(&dir).unwrap();
-  let fixture = Fixture(dir);
-  let path = fixture.0.join("unknown.fst");
+  let dir = test_dir();
+  let path = dir.path().join("unknown.fst");
   let mut writer = Writer::create(&path, true).unwrap();
   let handle = writer
     .create_var(var_type::VCD_REG, var_dir::OUTPUT, 4, "data", None)
@@ -108,11 +99,8 @@ fn hex_regex_skips_unknown_states_without_consuming_first_match() {
 
 #[test]
 fn prints_string_values_without_reencoding_bytes() {
-  let dir =
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("findfst-string-{}", std::process::id()));
-  fs::create_dir_all(&dir).unwrap();
-  let fixture = Fixture(dir);
-  let path = fixture.0.join("strings.fst");
+  let dir = test_dir();
+  let path = dir.path().join("strings.fst");
   let mut writer = Writer::create(&path, true).unwrap();
   let handle = writer
     .create_var(var_type::GEN_STRING, var_dir::OUTPUT, 0, "text", None)

@@ -29,3 +29,6 @@ bindgen = "0.72.1"
 cc = { version = "1.2.41", features = ["parallel"] }
 diffy = "0.5.2"
 vcpkg = "0.2.15"
+
+[dev-dependencies]
+tempfile = "3.23.0"

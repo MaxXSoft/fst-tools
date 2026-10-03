@@ -1,38 +1,10 @@
 #![allow(dead_code)]
 
 use fstapi::{Handle, Reader, Writer, file_type, scope_type, var_dir, var_type};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::Path;
 
-static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
-
-/// An isolated test directory under Cargo's temporary directory, removed on drop.
-pub struct TestDir(PathBuf);
-
-impl TestDir {
-  /// Creates a directory unique to this process and invocation.
-  pub fn new() -> Self {
-    let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-      "fstapi-{}-{}",
-      std::process::id(),
-      NEXT_DIR.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::create_dir_all(&path).unwrap();
-    Self(path)
-  }
-
-  /// Returns the path of a named file within this test directory.
-  pub fn path(&self, name: &str) -> PathBuf {
-    self.0.join(name)
-  }
-}
-
-impl Drop for TestDir {
-  fn drop(&mut self) {
-    let _ = fs::remove_dir_all(&self.0);
-  }
-}
+mod temp_dir;
+pub use temp_dir::TestDir;
 
 /// An owned value-change event that can be sorted for deterministic comparisons.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
