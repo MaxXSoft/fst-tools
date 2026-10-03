@@ -114,15 +114,17 @@ fn patched_fst_source(upstream: &Path, out_dir: &Path) -> PathBuf {
   let source = fs::read_to_string(upstream.join("fstapi.c"))
     .expect("failed to read libfst source")
     .replace("\r\n", "\n");
-  let before = include_str!("patches/real-alias.before").replace("\r\n", "\n");
-  let after = include_str!("patches/real-alias.after").replace("\r\n", "\n");
+  let patch = include_str!("patches/real-alias.patch").replace("\r\n", "\n");
+  let patch = diffy::Patch::from_str(&patch).expect("invalid libfst real-alias patch");
   assert_eq!(
-    source.matches(&before).count(),
+    patch.hunks().len(),
     1,
-    "libfst real-alias correction no longer matches exactly once; review the upstream pin and patches"
+    "libfst real-alias patch must contain exactly one hunk"
+  );
+  let corrected = diffy::apply(&source, &patch).expect(
+    "failed to apply libfst real-alias patch; review the upstream pin and patches/real-alias.patch",
   );
   let path = out_dir.join("fstapi.c");
-  fs::write(&path, source.replacen(&before, &after, 1))
-    .expect("failed to write corrected libfst source");
+  fs::write(&path, corrected).expect("failed to write corrected libfst source");
   path
 }

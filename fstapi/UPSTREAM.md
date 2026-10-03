@@ -33,13 +33,16 @@ The alias already refers to an existing facility, so the assignment is redundant
 This function is used both by VCD export and by opening zero-duration files;
 a VCD-only preflight cannot protect all callers.
 
-`patches/real-alias.before` and `.after` record the exact context and the
-single-line removal. The build script normalizes checkout line endings, requires
-exactly one matching hunk, and writes the corrected source to `OUT_DIR/fstapi.c`.
-It fails rather than silently dropping the correction after a source update.
-The patch fragments are included in published crates. The submodule and public
-C ABI remain unchanged. Remove the correction when the fix is available in the
-reviewed upstream pin, retaining the open/read/export boundary regressions.
+`patches/real-alias.patch` records the single-line removal as a standard unified
+diff, with paths relative to `third_party/libfst`. The build script normalizes
+checkout line endings and uses the Rust `diffy` crate to parse and apply the patch
+to `OUT_DIR/fstapi.c`; no external patch command is required. All context lines
+must match, although line offsets may change. The context includes the alias
+branch so the similar assignment for non-alias variables cannot match instead.
+An invalid patch, a missing or extra hunk, or a context mismatch fails the build.
+The patch is included in published crates. The submodule and public C ABI remain
+unchanged. Remove the correction when the fix is available in the reviewed
+upstream pin, retaining the open/read/export boundary regressions.
 
 Keep upstream files unchanged. Local responsibilities are:
 

@@ -1,0 +1,14 @@
+--- a/src/fstapi.c
++++ b/src/fstapi.c
+@@ -4368,11 +4368,10 @@
+                     xc->maxhandle++;
+                 } else {
+                     if ((vartype == FST_VT_VCD_REAL) || (vartype == FST_VT_VCD_REAL_PARAMETER) ||
+                         (vartype == FST_VT_VCD_REALTIME) || (vartype == FST_VT_SV_SHORTREAL)) {
+                         len = (vartype != FST_VT_SV_SHORTREAL) ? 64 : 32;
+-                        xc->signal_typs[xc->maxhandle] = FST_VT_VCD_REAL;
+                     }
+                     if (fv) {
+                         char vcdid_buf[16];
+                         uint32_t modlen = (vartype != FST_VT_VCD_PORT) ? len : ((len - 2) / 3);
+                         fstVcdID(vcdid_buf, alias);

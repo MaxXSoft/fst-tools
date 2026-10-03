@@ -1,6 +1,0 @@
-                } else {
-                    if ((vartype == FST_VT_VCD_REAL) || (vartype == FST_VT_VCD_REAL_PARAMETER) ||
-                        (vartype == FST_VT_VCD_REALTIME) || (vartype == FST_VT_SV_SHORTREAL)) {
-                        len = (vartype != FST_VT_SV_SHORTREAL) ? 64 : 32;
-                    }
-                    if (fv) {
