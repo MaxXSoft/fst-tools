@@ -2,7 +2,7 @@ mod hiers;
 mod vcd;
 
 use clap::{Parser, ValueEnum};
-use fstapi::{Error, Reader, Result, Writer, WriterPackType, writer_pack_type};
+use fstapi::{Reader, Result, Writer, WriterPackType, writer_pack_type};
 use vcd::VcdWriter;
 
 #[derive(Parser)]
@@ -132,8 +132,12 @@ fn try_main() -> Result<()> {
 
   // Get and set start time and end time.
   let (start, end) = get_start_end(&reader, cli.start, cli.end);
-  let timezero = i64::try_from(i128::from(reader.timezero()) + i128::from(start))
-    .map_err(|_| Error::InvalidOperation)?;
+  let timezero = try_or_exit!(
+    i64::try_from(i128::from(reader.timezero()) + i128::from(start)),
+    _,
+    "Clipped timezero exceeds the signed 64-bit range: {} + {start}!",
+    reader.timezero()
+  );
 
   // Create the output FST file.
   let mut writer = Writer::create(cli.output, !cli.no_comp_hier)?

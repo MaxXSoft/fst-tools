@@ -34,7 +34,7 @@ fn vcd_dump_preserves_hierarchy_values_and_reports_open_failure() {
   }
   assert_eq!(
     reader.dump_as_vcd(Some(dir.path("missing/dump.vcd"))),
-    Err(Error::InvalidOperation)
+    Err(Error::VcdExportFailed)
   );
 }
 
@@ -103,7 +103,7 @@ fn vcd_dump_reports_flush_failures_and_reader_can_be_reused() {
   // A small export remains buffered until fclose, where /dev/full fails.
   assert_eq!(
     reader.dump_as_vcd(Some("/dev/full")),
-    Err(Error::InvalidOperation)
+    Err(Error::VcdExportFailed)
   );
   let output = dir.path("after-error.vcd");
   reader.dump_as_vcd(Some(&output)).unwrap();

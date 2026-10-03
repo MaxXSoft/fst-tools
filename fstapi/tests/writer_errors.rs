@@ -1,7 +1,9 @@
 mod common;
 
 use common::*;
-use fstapi::{Error, Reader, Writer, var_dir, var_type};
+use fstapi::{
+  Error, LimitKind, Reader, ValueKind, VariableDefinitionError, Writer, var_dir, var_type,
+};
 
 fn rejected_value_preserves_initial_time(invalid_first: bool) {
   let dir = TestDir::new();
@@ -15,7 +17,7 @@ fn rejected_value_preserves_initial_time(invalid_first: bool) {
   }
   assert_eq!(
     writer.emit_value_change(handle, b"10"),
-    Err(Error::InvalidOperation)
+    Err(Error::ValueLengthMismatch(handle, 1, 2))
   );
   if invalid_first {
     writer.emit_value_change(handle, b"1").unwrap();
@@ -79,7 +81,7 @@ fn wrong_emitter_and_unknown_handles_are_rejected_without_side_effects() {
   writer.emit_value_change(bit, b"1").unwrap();
   assert_eq!(
     writer.emit_value_change(unknown, b"1"),
-    Err(Error::InvalidOperation)
+    Err(Error::InvalidHandle(unknown))
   );
   assert_eq!(
     writer.create_var(
@@ -89,14 +91,21 @@ fn wrong_emitter_and_unknown_handles_are_rejected_without_side_effects() {
       "bad-alias",
       Some(unknown)
     ),
-    Err(Error::InvalidOperation)
+    Err(Error::InvalidHandle(unknown))
   );
   assert_eq!(
     writer.emit_var_len_value_change(bit, b"a"),
-    Err(Error::InvalidOperation)
+    Err(Error::ValueKindMismatch(
+      bit,
+      ValueKind::Fixed,
+      ValueKind::Variable
+    ))
   );
   writer.emit_time_change(10).unwrap();
-  assert_eq!(writer.emit_time_change(9), Err(Error::InvalidOperation));
+  assert_eq!(
+    writer.emit_time_change(9),
+    Err(Error::TimeWentBackwards(10, 9))
+  );
   writer.emit_value_change(bit, b"0").unwrap();
   writer.emit_time_change(20).unwrap();
   drop(writer);
@@ -133,18 +142,22 @@ fn aliases_use_normalized_storage_and_reject_incompatible_widths() {
       "bad-alias",
       Some(real)
     ),
-    Err(Error::InvalidOperation)
+    Err(Error::IncompatibleAlias(real))
   );
   let string = writer
     .create_var(var_type::GEN_STRING, var_dir::OUTPUT, 32, "string", None)
     .unwrap();
   assert_eq!(
     writer.emit_value_change(string, b"wrong emitter"),
-    Err(Error::InvalidOperation)
+    Err(Error::ValueKindMismatch(
+      string,
+      ValueKind::Variable,
+      ValueKind::Fixed
+    ))
   );
   assert_eq!(
     writer.emit_value_change(real, b"1"),
-    Err(Error::InvalidOperation)
+    Err(Error::ValueLengthMismatch(real, 8, 1))
   );
   writer.emit_time_change(0).unwrap();
   writer
@@ -249,7 +262,9 @@ fn evcd_ports_require_a_complete_value_and_two_strength_vectors() {
   for width in [0, 1, 2, 3, 4, 6, 7, 9] {
     assert_eq!(
       writer.create_var(var_type::VCD_PORT, var_dir::INOUT, width, "invalid", None),
-      Err(Error::InvalidOperation)
+      Err(Error::InvalidVariableDefinition(
+        VariableDefinitionError::InvalidPortWidth(width)
+      ))
     );
   }
   let one = writer
@@ -282,6 +297,53 @@ fn evcd_ports_require_a_complete_value_and_two_strength_vectors() {
       },
     ]
   );
+}
+
+#[test]
+fn invalid_definitions_and_width_limits_preserve_the_variable_table() {
+  let dir = TestDir::new();
+  let path = dir.path("invalid-definitions.fst");
+  let mut writer = Writer::create(&path, true).unwrap();
+  for (ty, direction, width, expected) in [
+    (
+      var_type::MAX + 1,
+      var_dir::OUTPUT,
+      1,
+      Error::InvalidVariableDefinition(VariableDefinitionError::InvalidType(var_type::MAX + 1)),
+    ),
+    (
+      var_type::VCD_REG,
+      var_dir::MAX + 1,
+      1,
+      Error::InvalidVariableDefinition(VariableDefinitionError::InvalidDirection(var_dir::MAX + 1)),
+    ),
+    (
+      var_type::VCD_REG,
+      var_dir::OUTPUT,
+      i32::MAX as u32 + 1,
+      Error::LimitExceeded(
+        LimitKind::VariableWidth,
+        i32::MAX as u64 + 1,
+        i32::MAX as u64,
+      ),
+    ),
+  ] {
+    assert_eq!(
+      writer.create_var(ty, direction, width, "rejected", None),
+      Err(expected)
+    );
+  }
+  let bit = writer
+    .create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "bit", None)
+    .unwrap();
+  assert_eq!(u32::from(bit), 1);
+  writer.emit_value_change(bit, b"1").unwrap();
+  writer.emit_time_change(1).unwrap();
+  drop(writer);
+  let mut reader = Reader::open(path).unwrap();
+  assert_eq!(reader.var_count(), 1);
+  reader.set_mask_all();
+  assert_eq!(events(&mut reader)[0].value, b"1");
 }
 
 #[test]

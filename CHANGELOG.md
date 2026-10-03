@@ -8,6 +8,8 @@
   pinned to `c716c1f67e21a06aaf8722830b371516e70dc657`. Keep Rust adaptation and
   VCD export glue separate from upstream; include the C sources in crate packages.
 * Treat value emissions before an explicit timestamp as time-zero changes.
+* Replace `InvalidOperation` with specific declaration, handle, value, time,
+  capacity, callback, and backend errors carrying diagnostic context.
 
 ### Fixed
 

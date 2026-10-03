@@ -1,7 +1,7 @@
 use crate::consts::{AttrType, FileType, ScopeType, VarDir, VarType};
 use crate::types::Handle;
 use crate::utils::*;
-use crate::{Error, Result, capi};
+use crate::{BackendOperation, CallbackError, Error, LimitKind, Result, ValueKind, capi};
 use std::any::Any;
 use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
@@ -194,6 +194,8 @@ impl Reader {
   ///
   /// If the callback panics, further callbacks are skipped while libfst finishes
   /// the traversal, then the panic resumes after its C stack has returned.
+  /// Invalid callback data likewise skips further callbacks and returns the
+  /// first validation error after the traversal finishes.
   ///
   /// The callback will be called when value changes, and is defined as:
   ///
@@ -238,7 +240,7 @@ impl Reader {
       signal_values: self.signal_values.as_deref().unwrap(),
       native_doubles: self.native_doubles,
       panic: None,
-      invalid_value: false,
+      error: None,
     };
     let ret = unsafe {
       capi::fstReaderIterBlocks2(
@@ -254,8 +256,10 @@ impl Reader {
     if let Some(payload) = state.panic {
       resume_unwind(payload);
     }
-    if ret == 0 || state.invalid_value {
-      Err(Error::InvalidOperation)
+    if let Some(error) = state.error {
+      Err(error)
+    } else if ret == 0 {
+      Err(Error::BackendFailure(BackendOperation::ReadBlocks))
     } else {
       Ok(())
     }
@@ -272,8 +276,12 @@ impl Reader {
       if var.is_alias() {
         continue;
       }
-      if u32::from(var.handle()) as usize != values.len() + 1 {
-        return Err(Error::InvalidOperation);
+      let expected_handle = values.len() as u64 + 1;
+      if u64::from(u32::from(var.handle())) != expected_handle {
+        return Err(Error::InvalidHierarchy(
+          expected_handle,
+          var.handle().into(),
+        ));
       }
       let kind = match var.ty() {
         crate::var_type::VCD_REAL
@@ -286,16 +294,24 @@ impl Reader {
           // IterateHier exposes the bit width of an EVCD port; callbacks carry
           // its value and two strengths, separated by two spaces.
           let len = if ty == crate::var_type::VCD_PORT {
-            var
-              .length()
-              .checked_mul(3)
-              .and_then(|len| len.checked_add(2))
+            let len = u64::from(var.length()) * 3 + 2;
+            if len > u64::from(u32::MAX) {
+              return Err(Error::LimitExceeded(
+                LimitKind::EvcdEncodedWidth,
+                len,
+                u64::from(u32::MAX),
+              ));
+            }
+            len
           } else {
-            Some(var.length())
-          }
-          .ok_or(Error::InvalidOperation)?;
-          if len as u64 > isize::MAX as u64 {
-            return Err(Error::InvalidOperation);
+            u64::from(var.length())
+          };
+          if len > isize::MAX as u64 {
+            return Err(Error::LimitExceeded(
+              LimitKind::CallbackBytes,
+              len,
+              isize::MAX as u64,
+            ));
           }
           SignalValueKind::Fixed(len as usize)
         }
@@ -323,7 +339,7 @@ impl Reader {
     };
     match ret {
       0 => Ok(()),
-      _ => Err(Error::InvalidOperation),
+      _ => Err(Error::VcdExportFailed),
     }
   }
 }
@@ -353,7 +369,7 @@ struct BlockCallback<'a, F> {
   signal_values: &'a [SignalValueKind],
   native_doubles: bool,
   panic: Option<Box<dyn Any + Send>>,
-  invalid_value: bool,
+  error: Option<Error>,
 }
 
 impl<F> BlockCallback<'_, F>
@@ -364,28 +380,51 @@ where
   ///
   /// Further values are skipped after the first panic or invalid value.
   fn invoke(&mut self, time: u64, handle: u32, value: *const u8, var_len: Option<u32>) {
-    if self.panic.is_some() || self.invalid_value {
+    if self.panic.is_some() || self.error.is_some() {
       return;
     }
     let result = catch_unwind(AssertUnwindSafe(|| -> Result<()> {
-      let handle = Handle::new(handle).ok_or(Error::InvalidOperation)?;
+      let invalid_handle = || Error::InvalidCallbackData(handle, CallbackError::InvalidHandle);
+      let handle = Handle::new(handle).ok_or_else(invalid_handle)?;
       let kind = self
         .signal_values
         .get(u32::from(handle) as usize - 1)
-        .ok_or(Error::InvalidOperation)?;
+        .ok_or_else(invalid_handle)?;
+      let invalid_value = |reason| Error::InvalidCallbackData(handle.into(), reason);
       let len = match (kind, var_len) {
         (SignalValueKind::Variable, Some(len)) => len as usize,
         (SignalValueKind::Fixed(len), None) => *len,
         (SignalValueKind::Real, None) if self.native_doubles => 8,
-        (SignalValueKind::Real, None) if !value.is_null() => {
+        (SignalValueKind::Real, None) => {
+          if value.is_null() {
+            return Err(invalid_value(CallbackError::NullValuePointer));
+          }
           // Only textual real callbacks require a strlen scan. In native mode
           // the double is binary and can contain NUL bytes.
           unsafe { CStr::from_ptr(value.cast()) }.to_bytes().len()
         }
-        _ => return Err(Error::InvalidOperation),
+        (SignalValueKind::Variable, None) => {
+          return Err(invalid_value(CallbackError::ValueKindMismatch(
+            ValueKind::Variable,
+            ValueKind::Fixed,
+          )));
+        }
+        (SignalValueKind::Fixed(_) | SignalValueKind::Real, Some(_)) => {
+          return Err(invalid_value(CallbackError::ValueKindMismatch(
+            ValueKind::Fixed,
+            ValueKind::Variable,
+          )));
+        }
       };
-      if len > isize::MAX as usize || (len != 0 && value.is_null()) {
-        return Err(Error::InvalidOperation);
+      if len > isize::MAX as usize {
+        return Err(Error::LimitExceeded(
+          LimitKind::CallbackBytes,
+          len as u64,
+          isize::MAX as u64,
+        ));
+      }
+      if len != 0 && value.is_null() {
+        return Err(invalid_value(CallbackError::NullValuePointer));
       }
       let value = if len == 0 {
         &[]
@@ -397,7 +436,7 @@ where
     }));
     match result {
       Ok(Ok(())) => {}
-      Ok(Err(_)) => self.invalid_value = true,
+      Ok(Err(error)) => self.error = Some(error),
       Err(payload) => self.panic = Some(payload),
     }
   }
@@ -697,5 +736,167 @@ impl<'a> Iterator for Vars<'a> {
     }
 
     None
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn invalid_callbacks_retain_the_first_error_and_skip_later_values() {
+    let value = [b'0', 0, 0, 0, 0, 0, 0, 0];
+    for (name, kind, native_doubles, handle, data, var_len, reason) in [
+      (
+        "zero handle",
+        SignalValueKind::Fixed(1),
+        false,
+        0,
+        value.as_ptr(),
+        None,
+        CallbackError::InvalidHandle,
+      ),
+      (
+        "unknown handle",
+        SignalValueKind::Fixed(1),
+        false,
+        2,
+        value.as_ptr(),
+        None,
+        CallbackError::InvalidHandle,
+      ),
+      (
+        "fixed callback for variable value",
+        SignalValueKind::Variable,
+        false,
+        1,
+        value.as_ptr(),
+        None,
+        CallbackError::ValueKindMismatch(ValueKind::Variable, ValueKind::Fixed),
+      ),
+      (
+        "variable callback for fixed value",
+        SignalValueKind::Fixed(1),
+        false,
+        1,
+        value.as_ptr(),
+        Some(1),
+        CallbackError::ValueKindMismatch(ValueKind::Fixed, ValueKind::Variable),
+      ),
+      (
+        "variable callback for real value",
+        SignalValueKind::Real,
+        false,
+        1,
+        value.as_ptr(),
+        Some(1),
+        CallbackError::ValueKindMismatch(ValueKind::Fixed, ValueKind::Variable),
+      ),
+      (
+        "null fixed value",
+        SignalValueKind::Fixed(1),
+        false,
+        1,
+        ptr::null(),
+        None,
+        CallbackError::NullValuePointer,
+      ),
+      (
+        "null nonempty variable value",
+        SignalValueKind::Variable,
+        false,
+        1,
+        ptr::null(),
+        Some(1),
+        CallbackError::NullValuePointer,
+      ),
+      (
+        "null textual real value",
+        SignalValueKind::Real,
+        false,
+        1,
+        ptr::null(),
+        None,
+        CallbackError::NullValuePointer,
+      ),
+      (
+        "null native real value",
+        SignalValueKind::Real,
+        true,
+        1,
+        ptr::null(),
+        None,
+        CallbackError::NullValuePointer,
+      ),
+    ] {
+      let mut calls = 0;
+      let mut callback = |_, _, _: &[u8], _| calls += 1;
+      let mut state = BlockCallback {
+        callback: &mut callback,
+        signal_values: &[kind],
+        native_doubles,
+        panic: None,
+        error: None,
+      };
+      state.invoke(0, handle, data, var_len);
+      let expected = Some(Error::InvalidCallbackData(handle, reason));
+      assert_eq!(state.error, expected, "{name}");
+
+      // A different failure must not replace the original error, and a later
+      // valid value must not reach the user's callback either.
+      state.invoke(1, 0, ptr::null(), None);
+      let valid_var_len = matches!(kind, SignalValueKind::Variable).then_some(1);
+      state.invoke(2, 1, value.as_ptr(), valid_var_len);
+      assert_eq!(state.error, expected, "{name}");
+      assert!(state.panic.is_none(), "{name}");
+      assert_eq!(calls, 0, "{name}");
+    }
+  }
+
+  #[test]
+  fn oversized_callback_is_rejected_before_reading_its_pointer() {
+    let len = isize::MAX as usize + 1;
+    let mut calls = 0;
+    let mut callback = |_, _, _: &[u8], _| calls += 1;
+    let mut state = BlockCallback {
+      callback: &mut callback,
+      signal_values: &[SignalValueKind::Fixed(len)],
+      native_doubles: false,
+      panic: None,
+      error: None,
+    };
+    // There is no allocation of the declared size; validation must precede
+    // constructing the slice or reading any value bytes.
+    state.invoke(0, 1, b"0".as_ptr(), None);
+    let expected = Some(Error::LimitExceeded(
+      LimitKind::CallbackBytes,
+      len as u64,
+      isize::MAX as u64,
+    ));
+    assert_eq!(state.error, expected);
+    state.invoke(1, 0, ptr::null(), None);
+    assert_eq!(state.error, expected);
+    assert!(state.panic.is_none());
+    assert_eq!(calls, 0);
+  }
+
+  #[test]
+  fn empty_variable_callbacks_accept_null_and_nonnull_pointers() {
+    let mut values = Vec::new();
+    let mut callback = |time, handle, value: &[u8], var_len| {
+      values.push((time, u32::from(handle), value.to_vec(), var_len));
+    };
+    let mut state = BlockCallback {
+      callback: &mut callback,
+      signal_values: &[SignalValueKind::Variable],
+      native_doubles: false,
+      panic: None,
+      error: None,
+    };
+    state.invoke(0, 1, ptr::null(), Some(0));
+    state.invoke(1, 1, b"ignored".as_ptr(), Some(0));
+    assert_eq!(state.error, None);
+    assert!(state.panic.is_none());
+    assert_eq!(values, [(0, 1, vec![], true), (1, 1, vec![], true)]);
   }
 }

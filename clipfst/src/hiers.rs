@@ -1,4 +1,4 @@
-use fstapi::{Error, Handle, Hier, Reader, Result, Scope, ScopeType, Writer, var_type};
+use fstapi::{Error, Handle, Hier, LimitKind, Reader, Result, Scope, ScopeType, Writer, var_type};
 use regex::Regex;
 use std::collections::HashMap;
 
@@ -71,10 +71,10 @@ pub fn build(
         // The hierarchy reports the EVCD port bit width, while its writer API
         // accepts the value plus two strength vectors and their separators.
         let length = if v.ty() == var_type::VCD_PORT {
-          v.length()
-            .checked_mul(3)
-            .and_then(|length| length.checked_add(2))
-            .ok_or(Error::InvalidOperation)?
+          let encoded = u64::from(v.length()) * 3 + 2;
+          u32::try_from(encoded).map_err(|_| {
+            Error::LimitExceeded(LimitKind::EvcdEncodedWidth, encoded, u64::from(u32::MAX))
+          })?
         } else {
           v.length()
         };

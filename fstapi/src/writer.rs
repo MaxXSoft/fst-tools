@@ -1,7 +1,10 @@
 use crate::consts::{AttrType, FileType, ScopeType, VarDir, VarType, WriterPackType};
 use crate::types::Handle;
 use crate::utils::*;
-use crate::{Error, Result, capi, var_dir, var_type};
+use crate::{
+  BackendOperation, Error, LimitKind, Result, ValueKind, VariableDefinitionError, capi, var_dir,
+  var_type,
+};
 use std::ffi::CStr;
 use std::os::raw;
 use std::path::Path;
@@ -181,32 +184,49 @@ impl Writer {
     alias: Option<Handle>,
   ) -> Result<Handle> {
     let name = name.into_cstring()?;
-    if !(var_type::MIN..=var_type::MAX).contains(&ty)
-      || !(var_dir::MIN..=var_dir::MAX).contains(&dir)
-      || (ty == var_type::VCD_PORT && (len < 5 || !(len - 2).is_multiple_of(3)))
-    {
-      return Err(Error::InvalidOperation);
+    if !(var_type::MIN..=var_type::MAX).contains(&ty) {
+      return Err(Error::InvalidVariableDefinition(
+        VariableDefinitionError::InvalidType(ty),
+      ));
+    }
+    if !(var_dir::MIN..=var_dir::MAX).contains(&dir) {
+      return Err(Error::InvalidVariableDefinition(
+        VariableDefinitionError::InvalidDirection(dir),
+      ));
+    }
+    if ty == var_type::VCD_PORT && (len < 5 || !(len - 2).is_multiple_of(3)) {
+      return Err(Error::InvalidVariableDefinition(
+        VariableDefinitionError::InvalidPortWidth(len),
+      ));
     }
     let variable = Variable::new(ty, len);
     // The C writer uses a signed int for widths and uint32_t frame offsets.
     if variable.width > i32::MAX as u32 {
-      return Err(Error::InvalidOperation);
+      return Err(Error::LimitExceeded(
+        LimitKind::VariableWidth,
+        u64::from(variable.width),
+        i32::MAX as u64,
+      ));
     }
     let next_value_bytes = if let Some(alias) = alias {
       if self.variable(alias)? != variable {
-        return Err(Error::InvalidOperation);
+        return Err(Error::IncompatibleAlias(alias));
       }
       self.value_bytes
     } else {
       self
         .value_bytes
         .checked_add(variable.width)
-        .ok_or(Error::InvalidOperation)?
+        .ok_or(Error::LimitExceeded(
+          LimitKind::FrameBytes,
+          u64::from(self.value_bytes) + u64::from(variable.width),
+          u64::from(u32::MAX),
+        ))?
     };
     let handle = Handle::new(unsafe {
       capi::fstWriterCreateVar(self.ctx, ty, dir, len, name.as_ptr(), alias.into_handle())
     })
-    .ok_or(Error::InvalidOperation)?;
+    .ok_or(Error::BackendFailure(BackendOperation::CreateVariable))?;
     if alias.is_none() {
       self.variables.push(variable);
       self.value_bytes = next_value_bytes;
@@ -223,8 +243,19 @@ impl Writer {
   /// including 15 bytes per change, to protect libfst's 32-bit buffer arithmetic.
   pub fn emit_value_change(&mut self, handle: Handle, value: &[u8]) -> Result<()> {
     let variable = self.variable(handle)?;
-    if variable.width == 0 || value.len() != variable.width as usize {
-      return Err(Error::InvalidOperation);
+    if variable.width == 0 {
+      return Err(Error::ValueKindMismatch(
+        handle,
+        ValueKind::Variable,
+        ValueKind::Fixed,
+      ));
+    }
+    if value.len() != variable.width as usize {
+      return Err(Error::ValueLengthMismatch(
+        handle,
+        variable.width as usize,
+        value.len(),
+      ));
     }
     let next_value_bytes = checked_value_bytes(self.buffered_value_bytes, value.len())?;
     self.check_status()?;
@@ -245,10 +276,14 @@ impl Writer {
   ///
   /// Before the first explicit time change, the value is written at time zero.
   /// The same section budget as [`Self::emit_value_change`] applies. Exceeding
-  /// it returns [`Error::InvalidOperation`] before changing the time or values.
+  /// it returns [`Error::LimitExceeded`] before changing the time or values.
   pub fn emit_var_len_value_change(&mut self, handle: Handle, value: &[u8]) -> Result<()> {
     if self.variable(handle)?.width != 0 {
-      return Err(Error::InvalidOperation);
+      return Err(Error::ValueKindMismatch(
+        handle,
+        ValueKind::Fixed,
+        ValueKind::Variable,
+      ));
     }
     let next_value_bytes = checked_value_bytes(self.buffered_value_bytes, value.len())?;
     self.check_status()?;
@@ -275,8 +310,8 @@ impl Writer {
   /// libfst's public status flags are reported, but its fatal internal failures
   /// and errors during [`Drop`] cannot be converted to this result.
   pub fn emit_time_change(&mut self, time: u64) -> Result<()> {
-    if self.last_time.is_some_and(|last| time < last) {
-      return Err(Error::InvalidOperation);
+    if let Some(last) = self.last_time.filter(|&last| time < last) {
+      return Err(Error::TimeWentBackwards(last, time));
     }
     self.check_status()?;
     // Large hierarchies raise libfst's automatic flush threshold beyond this
@@ -323,16 +358,15 @@ impl Writer {
       .variables
       .get(u32::from(handle) as usize - 1)
       .copied()
-      .ok_or(Error::InvalidOperation)
+      .ok_or(Error::InvalidHandle(handle))
   }
 
   /// Reports a reached dump-size limit or seek failure from libfst's status flags.
   fn check_status(&self) -> Result<()> {
-    if unsafe {
-      capi::fstWriterGetDumpSizeLimitReached(self.ctx) != 0
-        || capi::fstWriterGetFseekFailed(self.ctx) != 0
-    } {
-      Err(Error::InvalidOperation)
+    if unsafe { capi::fstWriterGetDumpSizeLimitReached(self.ctx) != 0 } {
+      Err(Error::DumpSizeLimitReached)
+    } else if unsafe { capi::fstWriterGetFseekFailed(self.ctx) != 0 } {
+      Err(Error::SeekFailed)
     } else {
       Ok(())
     }
@@ -353,12 +387,26 @@ impl Drop for Writer {
 const MAX_BUFFERED_VALUE_BYTES: u32 = 1 << 30;
 
 fn checked_value_bytes(buffered: u32, len: usize) -> Result<u32> {
-  let len = u32::try_from(len).map_err(|_| Error::InvalidOperation)?;
-  buffered
-    .checked_add(len)
-    .and_then(|size| size.checked_add(15))
-    .filter(|&size| size <= MAX_BUFFERED_VALUE_BYTES)
-    .ok_or(Error::InvalidOperation)
+  // A record must fit even in an empty section (one byte plus 15 bytes of
+  // record overhead). Such a record cannot be rescued by flushing the section.
+  let payload_limit = MAX_BUFFERED_VALUE_BYTES - 16;
+  if len > payload_limit as usize {
+    return Err(Error::LimitExceeded(
+      LimitKind::ValueRecordBytes,
+      len as u64,
+      u64::from(payload_limit),
+    ));
+  }
+  let size = u64::from(buffered) + len as u64 + 15;
+  if size > u64::from(MAX_BUFFERED_VALUE_BYTES) {
+    Err(Error::LimitExceeded(
+      LimitKind::SectionValueBytes,
+      size,
+      u64::from(MAX_BUFFERED_VALUE_BYTES),
+    ))
+  } else {
+    Ok(size as u32)
+  }
 }
 
 /// Normalized storage metadata used to validate value lengths and aliases.
@@ -423,17 +471,63 @@ mod tests {
       checked_value_bytes(1, MAX_BUFFERED_VALUE_BYTES as usize - 16),
       Ok(MAX_BUFFERED_VALUE_BYTES)
     );
+    let payload_limit = u64::from(MAX_BUFFERED_VALUE_BYTES - 16);
+    for len in [
+      MAX_BUFFERED_VALUE_BYTES as usize - 15,
+      u32::MAX as usize,
+      usize::MAX,
+    ] {
+      assert_eq!(
+        checked_value_bytes(1, len),
+        Err(Error::LimitExceeded(
+          LimitKind::ValueRecordBytes,
+          len as u64,
+          payload_limit
+        ))
+      );
+    }
     for (buffered, len) in [
-      (1, MAX_BUFFERED_VALUE_BYTES as usize - 15),
-      (1, u32::MAX as usize),
       (MAX_BUFFERED_VALUE_BYTES - 14, 0),
       (MAX_BUFFERED_VALUE_BYTES - 16, 2),
+      (u32::MAX, 1),
     ] {
       assert_eq!(
         checked_value_bytes(buffered, len),
-        Err(Error::InvalidOperation)
+        Err(Error::LimitExceeded(
+          LimitKind::SectionValueBytes,
+          u64::from(buffered) + len as u64 + 15,
+          u64::from(MAX_BUFFERED_VALUE_BYTES),
+        ))
       );
     }
+  }
+
+  #[test]
+  fn frame_limit_rejects_before_creating_a_variable() {
+    let file = TestFile::new("writer-frame-budget");
+    let mut writer = Writer::create(&file.0, true).unwrap();
+    // Exercise frame-offset overflow without allocating a multi-GiB frame.
+    writer.value_bytes = u32::MAX;
+    assert_eq!(
+      writer.create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "rejected", None),
+      Err(Error::LimitExceeded(
+        LimitKind::FrameBytes,
+        u64::from(u32::MAX) + 1,
+        u64::from(u32::MAX),
+      ))
+    );
+    assert_eq!(writer.value_bytes, u32::MAX);
+    assert!(writer.variables.is_empty());
+    writer.value_bytes = 0;
+    let bit = writer
+      .create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "bit", None)
+      .unwrap();
+    assert_eq!(u32::from(bit), 1);
+    writer.emit_value_change(bit, b"1").unwrap();
+    writer.emit_time_change(1).unwrap();
+    drop(writer);
+    let reader = crate::Reader::open(&file.0).unwrap();
+    assert_eq!(reader.var_count(), 1);
   }
 
   #[test]
@@ -450,11 +544,19 @@ mod tests {
     writer.buffered_value_bytes = MAX_BUFFERED_VALUE_BYTES;
     assert_eq!(
       writer.emit_value_change(bit, b"1"),
-      Err(Error::InvalidOperation)
+      Err(Error::LimitExceeded(
+        LimitKind::SectionValueBytes,
+        u64::from(MAX_BUFFERED_VALUE_BYTES) + 16,
+        u64::from(MAX_BUFFERED_VALUE_BYTES),
+      ))
     );
     assert_eq!(
       writer.emit_var_len_value_change(string, b"first"),
-      Err(Error::InvalidOperation)
+      Err(Error::LimitExceeded(
+        LimitKind::SectionValueBytes,
+        u64::from(MAX_BUFFERED_VALUE_BYTES) + 20,
+        u64::from(MAX_BUFFERED_VALUE_BYTES),
+      ))
     );
     assert_eq!(writer.last_time, None);
     assert_eq!(writer.buffered_value_bytes, MAX_BUFFERED_VALUE_BYTES);
@@ -508,7 +610,11 @@ mod tests {
       assert_eq!(writer.buffered_value_bytes, MAX_BUFFERED_VALUE_BYTES);
       assert_eq!(
         writer.emit_value_change(bit, b"1"),
-        Err(Error::InvalidOperation)
+        Err(Error::LimitExceeded(
+          LimitKind::SectionValueBytes,
+          u64::from(MAX_BUFFERED_VALUE_BYTES) + 16,
+          u64::from(MAX_BUFFERED_VALUE_BYTES),
+        ))
       );
     }
     writer.emit_time_change(3).unwrap();

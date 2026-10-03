@@ -70,7 +70,9 @@ Keep upstream files unchanged. Local responsibilities are:
   reset it. At 512 MiB of budget usage, time changes proactively request a flush
   so long traces can continue in smaller sections. This is a per-section limit,
   not a limit on the total FST file size. Oversized changes return
-  `InvalidOperation` without emitting them.
+  `LimitExceeded` without emitting them. Its kind distinguishes an oversized
+  record payload from a full section; the error includes the requested size
+  and the applicable limit in bytes.
   Raw C-string attributes preserve binary source indices, and dump activity
   can be emitted independently of signal values.
 * `src/reader.rs`: own hierarchy records instead of retaining references into
