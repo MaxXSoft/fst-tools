@@ -339,6 +339,12 @@ impl Writer {
   }
 }
 
+impl Drop for Writer {
+  fn drop(&mut self) {
+    unsafe { capi::fstWriterClose(self.ctx) }
+  }
+}
+
 // Keep section payloads within one GiB, including record overhead. Upstream
 // stores buffer sizes and offsets in u32 and passes some lengths to signed-int
 // compression APIs. Its initial allocation is at most 2 GiB + 64 MiB. Growth
@@ -353,12 +359,6 @@ fn checked_value_bytes(buffered: u32, len: usize) -> Result<u32> {
     .and_then(|size| size.checked_add(15))
     .filter(|&size| size <= MAX_BUFFERED_VALUE_BYTES)
     .ok_or(Error::InvalidOperation)
-}
-
-impl Drop for Writer {
-  fn drop(&mut self) {
-    unsafe { capi::fstWriterClose(self.ctx) }
-  }
 }
 
 /// Normalized storage metadata used to validate value lengths and aliases.
