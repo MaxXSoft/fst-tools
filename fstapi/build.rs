@@ -127,7 +127,7 @@ fn patched_fst_source(upstream: &Path, out_dir: &Path) -> PathBuf {
     (
       "windows-stdio.patch",
       include_str!("patches/windows-stdio.patch"),
-      9,
+      22,
     ),
   ];
   for (name, contents, expected_hunks) in patches {

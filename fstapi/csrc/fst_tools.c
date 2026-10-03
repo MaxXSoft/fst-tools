@@ -3,7 +3,12 @@
 int fstToolsReaderDumpToVcdFile(fstReaderContext *ctx, const char *path) {
   if (!ctx) return 1;
 
-  FILE *file = path ? fopen(path, "wb") : stdout;
+#ifdef _WIN32
+  const char *mode = "wbN"; /* Do not pass this handle to unrelated children. */
+#else
+  const char *mode = "wb";
+#endif
+  FILE *file = path ? fopen(path, mode) : stdout;
   if (!file) return 1;
 
   char *buffer = NULL;

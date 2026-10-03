@@ -52,9 +52,22 @@ a repacked FST or reading a gzip hierarchy can fail.
 file-deletion paths. It retains named hierarchy scratch files until close and
 explicitly synchronizes both gzip input descriptors with `_lseeki64`, including
 hierarchies beyond the 32-bit offset range. Uncompressed hierarchy sidecars remain
-part of the output. Toolchain-specific MinGW headers and mmap paths are unchanged.
+part of the output.
+
+Closing a file in the parent process is insufficient if another thread has
+started a child that inherited its handle. Windows file opens therefore use
+the CRT's `N` mode to disable inheritance at creation time. The Windows temporary
+file path is also used by MSVC with `D`/`N` modes, preserving deletion on close
+without inheritable `tmpfile` handles. Gzip descriptors use `DuplicateHandle`
+with inheritance disabled before transferring ownership to `_open_osfhandle`;
+plain `_dup` can create an inheritable handle again. Setting handle flags after
+opening or duplicating would still race with concurrent process creation.
+The VCD export adapter uses `N` for its output stream as well. The mmap paths
+remain unchanged.
 See Microsoft's [input `fflush` semantics](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/fflush)
-and [64-bit descriptor seeking](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/lseek-lseeki64).
+and [64-bit descriptor seeking](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/lseek-lseeki64),
+[`fopen` mode flags](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/fopen-wfopen),
+and [`DuplicateHandle` inheritance](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-duplicatehandle).
 
 These patches are standard unified diffs with paths relative to
 `third_party/libfst`. The build script normalizes checkout line endings and uses
@@ -134,6 +147,7 @@ add undisclosed corrections, or fetch sources during a Cargo build.
 The crate tests generate small waveforms beneath Cargo's test artifact directory
 and remove them afterwards. They cover compression/hierarchy/repack combinations,
 including writer and reader scratch-file cleanup while retaining required sidecars,
+and cleanup while an unrelated child process is still alive,
 real and string values, aliases, EVCD ports, masks, time ranges, invalid input,
 initial values, VCD output, retained hierarchy data, and callback panics.
 Each CLI has integration tests using generated waveforms. Large simulator traces

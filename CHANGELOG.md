@@ -13,6 +13,8 @@
 
 ### Fixed
 
+* Prevent Windows child processes from inheriting FST and VCD file handles,
+  which could leave temporary files behind or prevent repack output replacement.
 * Read repacked FST files and gzip hierarchies correctly with Windows MSVC, and
   remove hierarchy and unpacking scratch files after closing their handles.
 * Handle signed C enum types on Windows in attribute metadata regression tests.
