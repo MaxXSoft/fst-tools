@@ -132,6 +132,9 @@ impl Writer {
   }
 
   /// Sets attribute begin.
+  ///
+  /// Subtype constants use target-dependent C enum types. Cast them with `as _`
+  /// when passing them to the `u32` subtype parameter.
   pub fn set_attr_begin(&mut self, ty: AttrType, sub_ty: u32, name: &str, arg: u64) -> Result<()> {
     let name = name.into_cstring()?;
     self.set_attr_begin_raw(ty, sub_ty, &name, arg)
@@ -140,6 +143,7 @@ impl Writer {
   /// Sets attribute begin, preserving names containing non-UTF-8 bytes.
   ///
   /// Some FST attributes encode binary integers in their nul-terminated names.
+  /// Convert subtype constants with `as _`, as for [`Self::set_attr_begin`].
   pub fn set_attr_begin_raw(
     &mut self,
     ty: AttrType,

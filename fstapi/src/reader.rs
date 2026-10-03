@@ -643,6 +643,8 @@ impl Attr<'_> {
   /// [`ArrayType`](crate::consts::ArrayType),
   /// [`EnumValueType`](crate::consts::EnumValueType) or
   /// [`PackType`](crate::consts::PackType).
+  /// These C enum types can be signed or unsigned depending on the target.
+  /// Cast the result to the appropriate enum type before matching its constants.
   pub fn subtype(&self) -> u32 {
     self.subtype
   }

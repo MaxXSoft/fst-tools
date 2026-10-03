@@ -13,6 +13,7 @@
 
 ### Fixed
 
+* Handle signed C enum types on Windows in attribute metadata regression tests.
 * Reject invalid writer operations without corrupting initial-value timestamps;
   preserve static initial values and initial variable-length values.
 * Keep hierarchy records valid as iteration advances, and resume callback panics

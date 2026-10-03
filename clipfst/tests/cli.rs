@@ -1,4 +1,4 @@
-use fstapi::{Hier, Reader, Writer, attr_type, misc_type, scope_type, var_dir, var_type};
+use fstapi::{Hier, MiscType, Reader, Writer, attr_type, misc_type, scope_type, var_dir, var_type};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -356,13 +356,13 @@ fn preserves_binary_source_attributes() {
   let fixture = Fixture::empty();
   let mut writer = Writer::create(&fixture.input, true).unwrap();
   writer
-    .set_attr_begin(attr_type::MISC, misc_type::PATHNAME, "source.sv", 128)
+    .set_attr_begin(attr_type::MISC, misc_type::PATHNAME as _, "source.sv", 128)
     .unwrap();
   for subtype in [misc_type::SOURCESTEM, misc_type::SOURCEISTEM] {
     writer
       .set_attr_begin_raw(
         attr_type::MISC,
-        subtype,
+        subtype as _,
         std::ffi::CStr::from_bytes_with_nul(&[0x80, 1, 0]).unwrap(),
         42,
       )
@@ -382,12 +382,12 @@ fn preserves_binary_source_attributes() {
     .filter_map(|hier| match hier {
       Hier::AttrBegin(attr)
         if matches!(
-          attr.subtype(),
+          attr.subtype() as MiscType,
           misc_type::SOURCESTEM | misc_type::SOURCEISTEM
         ) =>
       {
         Some((
-          attr.subtype(),
+          attr.subtype() as MiscType,
           attr.name_cstr().to_bytes().to_vec(),
           attr.arg_from_name(),
           attr.arg(),

@@ -150,7 +150,7 @@ fn displays_binary_source_stem_attribute_arguments() {
   ] {
     let name = CString::new(vec![source, 1]).unwrap();
     writer
-      .set_attr_begin_raw(attr_type::MISC, subtype, &name, line)
+      .set_attr_begin_raw(attr_type::MISC, subtype as _, &name, line)
       .unwrap();
   }
   writer.set_scope(scope_type::VCD_MODULE, "top", "").unwrap();

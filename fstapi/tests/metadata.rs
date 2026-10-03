@@ -12,7 +12,7 @@ fn binary_source_attributes_round_trip_without_utf8_conversion() {
   for (subtype, index) in [(misc_type::SOURCESTEM, 128), (misc_type::SOURCEISTEM, 129)] {
     let name = CString::new(vec![index as u8, 1]).unwrap();
     writer
-      .set_attr_begin_raw(attr_type::MISC, subtype, &name, 42)
+      .set_attr_begin_raw(attr_type::MISC, subtype as _, &name, 42)
       .unwrap();
   }
   let handle = writer
