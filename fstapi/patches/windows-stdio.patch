@@ -1,0 +1,107 @@
+--- a/src/fstapi.c
++++ b/src/fstapi.c
+@@ -109,7 +109,7 @@
+ #include <sys/sysctl.h>
+ #endif
+ 
+-#if defined(FST_MACOSX) || defined(__MINGW32__) || defined(__OpenBSD__) || defined(__FreeBSD__) || \
++#if defined(FST_MACOSX) || defined(_WIN32) || defined(__OpenBSD__) || defined(__FreeBSD__) || \
+     defined(__NetBSD__)
+ #define FST_UNBUFFERED_IO
+ #endif
+@@ -1985,7 +1985,7 @@
+             gzFile zhandle;
+             int zfd;
+             int fourpack_duo = 0;
+-#ifndef __MINGW32__
++#ifndef _WIN32
+             int fnam_len = strlen(xc->filename) + 5 + 1;
+             char *fnam = (char *)malloc(fnam_len);
+ #endif
+@@ -2086,7 +2086,7 @@
+                             SEEK_END); /* move file pointer to end for any section adds */
+             fflush(xc->handle);
+ 
+-#ifndef __MINGW32__
++#ifndef _WIN32
+             snprintf(fnam, fnam_len, "%s.hier", xc->filename);
+             unlink(fnam);
+             free(fnam);
+@@ -2175,7 +2175,7 @@
+             }
+         }
+ 
+-#ifdef __MINGW32__
++#ifdef _WIN32
+         {
+             int flen = strlen(xc->filename);
+             char *hf = (char *)calloc(1, flen + 6);
+@@ -3728,7 +3728,10 @@
+         if (htyp == FST_BL_HIER) {
+             fstReaderFseeko(xc, xc->f, xc->hier_pos, SEEK_SET);
+             uclen = fstReaderUint64(xc->f);
+-#ifndef __MINGW32__
++#ifdef _WIN32
++            /* UCRT input buffering does not synchronize the shared descriptor. */
++            _lseeki64(fileno(xc->f), xc->hier_pos + 8, SEEK_SET);
++#else
+             fflush(xc->f);
+ #endif
+             zfd = dup(fileno(xc->f));
+@@ -3763,10 +3766,15 @@
+             }
+         }
+ 
+-#ifndef __MINGW32__
+-        if (fnam)
++        if (fnam) {
++#ifdef _WIN32
++            /* Windows cannot unlink an open file; tmpfile_close owns its name. */
++            xc->fh_nam = fnam;
++            fnam = NULL;
++#else
+             unlink(fnam);
+ #endif
++        }
+ 
+         if (htyp == FST_BL_HIER) {
+             for (hl = 0; hl < uclen; hl += FST_GZIO_LEN) {
+@@ -3838,11 +3846,8 @@
+         } else /* FST_BL_SKIP */
+         {
+             pass_status = 0;
+-            if (xc->fh) {
+-                fclose(xc->fh);
+-                xc->fh =
+-                    NULL; /* needed in case .hier file is missing and there are no hier sections */
+-            }
++            /* Also clear the handle when the file has no hierarchy section. */
++            tmpfile_close(&xc->fh, &xc->fh_nam);
+         }
+ 
+         free(mem);
+@@ -4469,7 +4474,7 @@
+                 0); /* keeps gzip from acting weird in tandem with fopen */
+ #endif
+ 
+-#ifdef __MINGW32__
++#ifdef _WIN32
+         xc->filename_unpacked = hf;
+ #else
+         if (hf) {
+@@ -4479,13 +4484,13 @@
+ #endif
+ 
+         fstReaderFseeko(xc, xc->f, FST_ZWRAPPER_HDR_SIZE, SEEK_SET);
+-#ifndef __MINGW32__
++#ifndef _WIN32
+         fflush(xc->f);
+ #else
+         /* Windows UCRT runtime library reads one byte ahead in the file
+            even with buffering disabled and does not synchronise the
+            file position after fseek. */
+-        _lseek(fileno(xc->f), FST_ZWRAPPER_HDR_SIZE, SEEK_SET);
++        _lseeki64(fileno(xc->f), FST_ZWRAPPER_HDR_SIZE, SEEK_SET);
+ #endif
+ 
+         zfd = dup(fileno(xc->f));

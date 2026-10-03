@@ -124,6 +124,11 @@ fn patched_fst_source(upstream: &Path, out_dir: &Path) -> PathBuf {
       include_str!("patches/msvc-varint.patch"),
       3,
     ),
+    (
+      "windows-stdio.patch",
+      include_str!("patches/windows-stdio.patch"),
+      9,
+    ),
   ];
   for (name, contents, expected_hunks) in patches {
     let contents = contents.replace("\r\n", "\n");

@@ -5,7 +5,6 @@ use fstapi::{Reader, Writer, file_type, var_dir, var_type, writer_pack_type};
 
 #[test]
 fn round_trip_compression_hierarchy_and_repack() {
-  let dir = TestDir::new();
   for pack in [
     writer_pack_type::ZLIB,
     writer_pack_type::FASTLZ,
@@ -13,30 +12,48 @@ fn round_trip_compression_hierarchy_and_repack() {
   ] {
     for compressed_hier in [false, true] {
       for repack in [false, true] {
-        let path = dir.path(&format!("fixture-{pack}-{compressed_hier}-{repack}.fst"));
+        let dir = TestDir::new();
+        let path = dir.path("fixture.fst");
+        let case = format!("pack {pack}, compressed_hier {compressed_hier}, repack {repack}");
+        let mut expected_files = vec![path.clone()];
+        if !compressed_hier {
+          expected_files.push(dir.path("fixture.fst.hier"));
+        }
+        expected_files.sort();
+        let assert_files = |stage| {
+          let mut files: Vec<_> = std::fs::read_dir(dir.path(""))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+          files.sort();
+          assert_eq!(files, expected_files, "{case}, after {stage}");
+        };
         let handles = fixture(&path, pack, compressed_hier, repack);
-        let mut reader = Reader::open(&path).unwrap();
-        assert_eq!(reader.date().unwrap(), "regression fixture");
-        assert_eq!(reader.version().unwrap(), "fstapi regression");
-        assert_eq!((reader.start_time(), reader.end_time()), (0, 20));
-        assert_eq!(reader.file_type(), file_type::VERILOG);
+        assert_files("writer close");
+        let mut reader = Reader::open(&path).unwrap_or_else(|error| panic!("{case}: {error}"));
+        assert_eq!(reader.date().unwrap(), "regression fixture", "{case}");
+        assert_eq!(reader.version().unwrap(), "fstapi regression", "{case}");
+        assert_eq!((reader.start_time(), reader.end_time()), (0, 20), "{case}");
+        assert_eq!(reader.file_type(), file_type::VERILOG, "{case}");
         assert_eq!(
           (
             reader.scope_count(),
             reader.var_count(),
             reader.alias_count()
           ),
-          (2, 5, 1)
+          (2, 5, 1),
+          "{case}"
         );
         assert_eq!(
           (reader.timescale(), reader.timescale_str()),
-          (-9, Some("1ns"))
+          (-9, Some("1ns")),
+          "{case}"
         );
-        assert_eq!(reader.timezero(), -7);
+        assert_eq!(reader.timezero(), -7, "{case}");
         let variables: Vec<_> = reader
           .vars()
           .map(|entry| {
-            let (name, var) = entry.unwrap();
+            let (name, var) = entry.unwrap_or_else(|error| panic!("{case}: {error}"));
             (
               name,
               var.ty(),
@@ -90,16 +107,20 @@ fn round_trip_compression_hierarchy_and_repack() {
               handles[0],
               true
             ),
-          ]
+          ],
+          "{case}"
         );
         reader.set_mask_all();
         for native_doubles in [false, true, false] {
           reader.set_native_doubles_on_callback(native_doubles);
           assert_eq!(
             events(&mut reader),
-            expected_events(handles, native_doubles)
+            expected_events(handles, native_doubles),
+            "{case}, native_doubles {native_doubles}"
           );
         }
+        drop(reader);
+        assert_files("reader close");
       }
     }
   }

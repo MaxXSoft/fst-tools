@@ -86,7 +86,7 @@ const PORTS: [&[u8]; 4] = [b"01 66 77", b"10 77 66", b"11 66 66", b"00 77 77"];
 type Value = (u64, Vec<u8>, bool);
 
 fn read_values(path: &Path) -> (Reader, BTreeMap<String, Vec<Value>>) {
-  let mut reader = Reader::open(path).unwrap();
+  let mut reader = Reader::open(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
   let names: BTreeMap<_, _> = reader
     .vars()
     .filter_map(|entry| {
@@ -278,6 +278,13 @@ fn invalid_windows_and_missing_signals_report_failure() {
 #[test]
 fn failed_in_place_selection_preserves_input_without_extra_files() {
   let fixture = Fixture::new();
+  let files = || {
+    fs::read_dir(fixture.dir.path())
+      .unwrap()
+      .map(|entry| entry.unwrap().path())
+      .collect::<Vec<_>>()
+  };
+  assert_eq!(files(), vec![fixture.input.clone()], "fixture cleanup");
   let original = fs::read(&fixture.input).unwrap();
   let result = Command::new(env!("CARGO_BIN_EXE_clipfst"))
     .arg(&fixture.input)
@@ -287,7 +294,7 @@ fn failed_in_place_selection_preserves_input_without_extra_files() {
     .unwrap();
   assert!(!result.status.success());
   assert_eq!(fs::read(&fixture.input).unwrap(), original);
-  assert_eq!(fs::read_dir(fixture.dir.path()).unwrap().count(), 1);
+  assert_eq!(files(), vec![fixture.input.clone()], "clipfst cleanup");
 }
 
 #[test]

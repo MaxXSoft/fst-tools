@@ -43,13 +43,26 @@ These are variable-length arrays in C, which MSVC does not support.
 `patches/msvc-varint.patch` changes the three declarations to enum constants,
 preserving the 5-, 5-, and 16-byte buffers, read limits, and TALOS-2023-1783 checks.
 
-Both patches are standard unified diffs with paths relative to
+The pinned engine restricts several Windows file-handling workarounds to MinGW.
+MSVC consequently tries to unlink open hierarchy and unpacked files, leaving
+them behind, and uses `fflush` on input streams before handing their duplicated
+descriptors to zlib. UCRT does not synchronize input streams that way, so opening
+a repacked FST or reading a gzip hierarchy can fail.
+`patches/windows-stdio.patch` includes MSVC in the unbuffered reader and deferred
+file-deletion paths. It retains named hierarchy scratch files until close and
+explicitly synchronizes both gzip input descriptors with `_lseeki64`, including
+hierarchies beyond the 32-bit offset range. Uncompressed hierarchy sidecars remain
+part of the output. Toolchain-specific MinGW headers and mmap paths are unchanged.
+See Microsoft's [input `fflush` semantics](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/fflush)
+and [64-bit descriptor seeking](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/lseek-lseeki64).
+
+These patches are standard unified diffs with paths relative to
 `third_party/libfst`. The build script normalizes checkout line endings and uses
-the Rust `diffy` crate to apply both patches, in the listed order, to
+the Rust `diffy` crate to apply all patches, in the listed order, to
 `OUT_DIR/fstapi.c` on every target; no external patch command is required.
 All context lines must match, although line offsets may change. An invalid patch,
 an unexpected hunk count, or a context mismatch fails the build and identifies
-the patch. Both patches are included in published crates. The submodule and public
+the patch. All patches are included in published crates. The submodule and public
 C ABI remain unchanged. Remove each correction when its fix is available in the
 reviewed upstream pin.
 
@@ -112,7 +125,7 @@ CANNOT report all write failures through Rust's `Drop`.
 5. Commit the gitlink update with any necessary wrapper changes and record the
    upstream revision and validation in the commit description.
 
-Actual engine fixes should be proposed upstream. The two documented corrections
+Actual engine fixes should be proposed upstream. The documented corrections
 are the only build-time exceptions; do not silently edit the submodule,
 add undisclosed corrections, or fetch sources during a Cargo build.
 
@@ -120,6 +133,7 @@ add undisclosed corrections, or fetch sources during a Cargo build.
 
 The crate tests generate small waveforms beneath Cargo's test artifact directory
 and remove them afterwards. They cover compression/hierarchy/repack combinations,
+including writer and reader scratch-file cleanup while retaining required sidecars,
 real and string values, aliases, EVCD ports, masks, time ranges, invalid input,
 initial values, VCD output, retained hierarchy data, and callback panics.
 Each CLI has integration tests using generated waveforms. Large simulator traces
