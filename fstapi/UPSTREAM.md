@@ -3,7 +3,7 @@
 The FST implementation is based on the unmodified
 [gtkwave/libfst](https://github.com/gtkwave/libfst) Git submodule at
 `third_party/libfst`. The submodule gitlink is the authoritative revision; builds
-do not fetch or follow the upstream branch. Two reviewed compatibility corrections
+do not fetch or follow the upstream branch. Some reviewed compatibility corrections
 are applied to a build-local source copy, as described below.
 
 Initialize a source checkout before building:
@@ -48,10 +48,9 @@ Both patches are standard unified diffs with paths relative to
 the Rust `diffy` crate to apply both patches, in the listed order, to
 `OUT_DIR/fstapi.c` on every target; no external patch command is required.
 All context lines must match, although line offsets may change. An invalid patch,
-an unexpected hunk count (one for real-alias, three for MSVC), or a context
-mismatch fails the build and identifies the patch.
-Both patches are included in published crates. The submodule and public C ABI
-remain unchanged. Remove each correction when its fix is available in the
+an unexpected hunk count, or a context mismatch fails the build and identifies
+the patch. Both patches are included in published crates. The submodule and public
+C ABI remain unchanged. Remove each correction when its fix is available in the
 reviewed upstream pin.
 
 Keep upstream files unchanged. Local responsibilities are:
