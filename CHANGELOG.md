@@ -4,6 +4,8 @@
 
 ### Changed
 
+* Make `queryfst` human-readable by default; use `--format json` or `--json`
+  for its version 2 JSON Lines interface.
 * Replace the modified C snapshot with the official libfst submodule, initially
   pinned to `c716c1f67e21a06aaf8722830b371516e70dc657`. Keep Rust adaptation and
   VCD export glue separate from upstream; include the C sources in crate packages.
@@ -38,6 +40,14 @@
 
 ### Added
 
+* Structured `findfst` output, exact time windows, and separate output/scanning
+  budgets with explicit completion and truncation status.
+* SQL sampling in `queryfst`: signal bindings, periodic snapshots, integer
+  expressions, streaming aggregation, temporal predicates, and match context.
+* Callback, sample, group, buffer, byte, row, and cooperative duration budgets;
+  no token budget or continuation protocol.
+* Cooperative reader cancellation with normal C buffer cleanup, including
+  callback panic/error paths, using a documented build-local libfst patch.
 * Versioned JSON metadata and hierarchy output in `readfst`, plus variable-name
   regex filtering for both structured and existing text output.
 * `queryfst` for selected-signal JSONL queries with exact time bounds, initial

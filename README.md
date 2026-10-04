@@ -20,14 +20,18 @@ For more details, please see:
 * [`readfst`](readfst): tool for displaying information about the contents of FST waveform, like `readelf`.
 * [`findfst`](findfst): tool for finding values of signals from FST waveform, like `fstminer` tool that comes with GTKWave but more powerful.
 * [`clipfst`](clipfst): tool for clipping from FST waveform.
-* [`queryfst`](queryfst): selected-signal, time-window queries as JSON Lines, with bounded event output and scalar residency summaries.
+* [`queryfst`](queryfst): selected-signal event queries and SQL sampling, with temporal predicates, aggregation, context windows, and resource budgets.
 
 For scripts and agents, `readfst --format json -a trace.fst` returns versioned
 metadata and hierarchy data. Use `--signals REGEX` with `--vars` to narrow signal
-discovery, then `queryfst` to inspect values without exporting a complete VCD.
+discovery, then `queryfst --format json` to inspect values without exporting a
+complete VCD. `findfst --format json` provides structured value matches. Both
+tools default to human-readable output and distinguish incomplete scans from
+truncated output.
 See the [readfst JSON schema](readfst/README.md) and
 [queryfst query semantics](queryfst/README.md) for timestamp precision, aliases,
-initial values, recording gaps, output limits, and completion checks.
+initial values, recording gaps, output limits, and completion checks. See the
+[findfst interface](findfst/README.md) for value-search semantics.
 
 ## Building from Source
 

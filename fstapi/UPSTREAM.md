@@ -79,6 +79,17 @@ the patch. All patches are included in published crates. The submodule and publi
 C ABI remain unchanged. Remove each correction when its fix is available in the
 reviewed upstream pin.
 
+`patches/reader-cancel.patch` adds the project-owned
+`fstToolsReaderIterBlocksControlled` entry point. The original reader entry point
+delegates with a null cancellation flag, preserving its ABI. Rust callbacks can
+set a same-thread flag; the reader checks it during frame delivery and value
+iteration, then follows normal buffer cleanup. This powers
+`Reader::for_each_block_controlled`, which returns whether traversal exhausted
+its input. Callback panics and validation errors use the same cleanup path.
+Cancellation does not preempt block loading/decompression, bound backend memory,
+or provide a resumable cursor. The fixed, variable-length, frame-snapshot, panic,
+and repeated-reader-use regressions must accompany changes to this patch.
+
 Keep upstream files unchanged. Local responsibilities are:
 
 * `src/writer.rs`: validate handles, normalized value widths, aliases, EVCD
