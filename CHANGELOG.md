@@ -38,6 +38,11 @@
 
 ### Added
 
+* Versioned JSON metadata and hierarchy output in `readfst`, plus variable-name
+  regex filtering for both structured and existing text output.
+* `queryfst` for selected-signal JSONL queries with exact time bounds, initial
+  observations, alias metadata, explicit output truncation, lossless values,
+  dump-activity information, and scalar state residency summaries.
 * Crate and command-line integration regressions.
 * SV array scope constant.
 * CI verification of packaged source builds.
