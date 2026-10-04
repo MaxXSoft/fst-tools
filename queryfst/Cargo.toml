@@ -3,7 +3,7 @@ name = "queryfst"
 version = "0.0.3"
 authors = ["MaxXing <x@MaxXSoft.net>"]
 edition = "2024"
-description = "Query selected FST waveform values as bounded JSON Lines."
+description = "Query FST waveform events and sampled state with bounded SQL and JSON output."
 repository = "https://github.com/MaxXSoft/fst-tools"
 license = "MIT OR Apache-2.0"
 
@@ -12,6 +12,7 @@ clap = { version = "4.5.50", features = ["derive"] }
 fstapi = { path = "../fstapi" }
 regex = "1.12.2"
 serde_json = "1.0"
+sqlparser = { version = "0.53", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3.23.0"

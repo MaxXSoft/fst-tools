@@ -52,7 +52,9 @@ fn invoke(path: &Path, args: &[&str]) -> Output {
 
 /// Parses every output line and requires successful completion.
 fn run(path: &Path, args: &[&str]) -> Vec<Value> {
-  let output = invoke(path, args);
+  let mut json_args = vec!["--format", "json"];
+  json_args.extend_from_slice(args);
+  let output = invoke(path, &json_args);
   assert!(
     output.status.success(),
     "{}",
