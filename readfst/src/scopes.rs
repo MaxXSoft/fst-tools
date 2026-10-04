@@ -1,11 +1,13 @@
 use crate::section::{Item, Section};
 use fstapi::{Hier, Reader, Result, Scope, scope_type};
+use serde::Serialize;
 use tabled::Tabled;
 
 /// Scope information.
-#[derive(Tabled)]
+#[derive(Serialize, Tabled)]
 pub struct ScopeInfo {
   #[tabled(rename = "Type")]
+  #[serde(rename = "type")]
   ty: &'static str,
   #[tabled(rename = "Name")]
   name: String,
@@ -14,7 +16,7 @@ pub struct ScopeInfo {
 }
 
 impl ScopeInfo {
-  fn new(scope: Scope) -> Result<Self> {
+  pub(crate) fn new(scope: Scope) -> Result<Self> {
     Ok(Self {
       ty: match scope.ty() {
         scope_type::VCD_MODULE => "VcdModule",

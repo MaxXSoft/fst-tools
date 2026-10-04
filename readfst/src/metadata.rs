@@ -1,9 +1,10 @@
 use crate::section::{Item, Section};
 use fstapi::{Reader, Result, file_type};
+use serde::Serialize;
 use tabled::Tabled;
 
 /// Metadata information.
-#[derive(Tabled)]
+#[derive(Serialize, Tabled)]
 pub struct Metadata {
   #[tabled(rename = "Date")]
   date: String,
@@ -14,16 +15,22 @@ pub struct Metadata {
   #[tabled(rename = "Timescale")]
   timescale: &'static str,
   #[tabled(rename = "Timezero")]
+  #[serde(serialize_with = "crate::json::decimal")]
   timezero: i64,
   #[tabled(rename = "Start time")]
+  #[serde(serialize_with = "crate::json::decimal")]
   start_time: u64,
   #[tabled(rename = "End time")]
+  #[serde(serialize_with = "crate::json::decimal")]
   end_time: u64,
   #[tabled(rename = "Number of scopes")]
+  #[serde(serialize_with = "crate::json::decimal")]
   num_scopes: u64,
   #[tabled(rename = "Number of variables")]
+  #[serde(serialize_with = "crate::json::decimal")]
   num_vars: u64,
   #[tabled(rename = "Number of alias")]
+  #[serde(serialize_with = "crate::json::decimal")]
   num_aliases: u64,
 }
 
