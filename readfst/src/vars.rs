@@ -1,7 +1,8 @@
 use crate::section::{Item, Print, Section, ToTable};
 use fstapi::{Handle, Reader, Result, Var, var_dir, var_type};
+use regex::Regex;
+use serde::Serialize;
 use std::collections::HashMap;
-use std::mem;
 use tabled::object::{FirstRow, LastColumn};
 use tabled::{Alignment, Disable, Modify, Panel, Tabled};
 
@@ -9,24 +10,28 @@ use tabled::{Alignment, Disable, Modify, Panel, Tabled};
 type VarNames = HashMap<Handle, Box<str>>;
 
 /// Variable information.
-#[derive(Tabled)]
+#[derive(Serialize, Tabled)]
 pub struct VarInfo {
   #[tabled(rename = "Handle")]
+  #[serde(serialize_with = "crate::json::handle")]
   handle: Handle,
   #[tabled(rename = "Type")]
+  #[serde(rename = "type")]
   ty: &'static str,
   #[tabled(rename = "Direction")]
   direction: &'static str,
   #[tabled(rename = "Name")]
   name: String,
   #[tabled(rename = "Length in Bits")]
+  #[serde(rename = "width")]
   length: u32,
   #[tabled(rename = "Alias Of")]
-  alias_of: &'static str,
+  #[serde(skip)]
+  alias_of: String,
 }
 
 impl VarInfo {
-  fn new(name: &str, var: &Var, alias_of: &'static str) -> Self {
+  pub(crate) fn new(name: &str, var: &Var, alias_of: &str) -> Self {
     Self {
       handle: var.handle(),
       ty: match var.ty() {
@@ -73,55 +78,53 @@ impl VarInfo {
       },
       name: name.into(),
       length: var.length(),
-      alias_of,
+      alias_of: alias_of.into(),
     }
   }
 }
 
 /// Trait for variable section.
 pub trait VarSection: Sized {
-  fn new(reader: &mut Reader) -> Result<Self>;
+  fn new(reader: &mut Reader, filter: Option<&Regex>) -> Result<Self>;
   fn vars(&self) -> &[VarInfo];
 }
 
 /// Variables information.
 pub struct Variables {
   vars: Vec<VarInfo>,
-  _names: VarNames,
 }
 
 impl Variables {
-  fn new(reader: &mut Reader, no_aliases: bool) -> Result<Self> {
+  fn new(reader: &mut Reader, no_aliases: bool, filter: Option<&Regex>) -> Result<Self> {
     let mut vars = Vec::new();
     let mut names = VarNames::new();
     for var in reader.vars() {
       let (name, var) = var?;
+      // Retain canonical names even when only an alias matches the filter.
+      if !var.is_alias() {
+        assert!(names.insert(var.handle(), name.clone().into()).is_none());
+      }
       if no_aliases && var.is_alias() {
+        continue;
+      }
+      if filter.is_some_and(|filter| !filter.is_match(&name)) {
         continue;
       }
       // Collect variable information.
       let alias_of = if var.is_alias() {
-        // Safe because `vars` do not outlive `names`.
-        unsafe { mem::transmute::<&str, &str>(names[&var.handle()].as_ref()) }
+        names[&var.handle()].as_ref()
       } else {
         ""
       };
       vars.push(VarInfo::new(&name, &var, alias_of));
-      // Update handle-name map.
-      if !var.is_alias() {
-        assert!(names.insert(var.handle(), name.into()).is_none());
-      }
     }
-    Ok(Self {
-      vars,
-      _names: names,
-    })
+    Ok(Self { vars })
   }
 }
 
 impl VarSection for Variables {
-  fn new(reader: &mut Reader) -> Result<Self> {
-    Self::new(reader, false)
+  fn new(reader: &mut Reader, filter: Option<&Regex>) -> Result<Self> {
+    Self::new(reader, false, filter)
   }
 
   fn vars(&self) -> &[VarInfo] {
@@ -145,8 +148,8 @@ impl Section for Variables {
 pub struct NoAliasesVars(Variables);
 
 impl VarSection for NoAliasesVars {
-  fn new(reader: &mut Reader) -> Result<Self> {
-    Variables::new(reader, true).map(Self)
+  fn new(reader: &mut Reader, filter: Option<&Regex>) -> Result<Self> {
+    Variables::new(reader, true, filter).map(Self)
   }
 
   fn vars(&self) -> &[VarInfo] {
@@ -176,8 +179,8 @@ impl<V> VarSection for NameOnly<V>
 where
   V: VarSection,
 {
-  fn new(reader: &mut Reader) -> Result<Self> {
-    V::new(reader).map(Self)
+  fn new(reader: &mut Reader, filter: Option<&Regex>) -> Result<Self> {
+    V::new(reader, filter).map(Self)
   }
 
   fn vars(&self) -> &[VarInfo] {

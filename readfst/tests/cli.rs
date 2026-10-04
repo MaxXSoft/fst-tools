@@ -1,11 +1,28 @@
 use fstapi::{Writer, attr_type, misc_type, scope_type, var_dir, var_type};
 use std::ffi::CString;
+use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
 fn test_dir() -> TempDir {
   let test_binary = std::env::current_exe().unwrap();
   tempfile::tempdir_in(test_binary.parent().unwrap()).unwrap()
+}
+
+fn json_output(path: &Path, args: &[&str]) -> serde_json::Value {
+  let result = Command::new(env!("CARGO_BIN_EXE_readfst"))
+    .arg(path)
+    .args(["--format", "json"])
+    .args(args)
+    .output()
+    .unwrap();
+  assert!(
+    result.status.success(),
+    "{}",
+    String::from_utf8_lossy(&result.stderr)
+  );
+  assert!(result.stderr.is_empty());
+  serde_json::from_slice(&result.stdout).unwrap()
 }
 
 #[test]
@@ -185,4 +202,175 @@ fn displays_binary_source_stem_attribute_arguments() {
       "{output}"
     );
   }
+  let json = json_output(&path, &["--attrs"]);
+  let stems: Vec<_> = json["attributes"]
+    .as_array()
+    .unwrap()
+    .iter()
+    .filter_map(|attr| attr.get("data"))
+    .filter(|data| matches!(data["subtype"].as_str(), Some("SourceStem" | "SourceIStem")))
+    .collect();
+  assert_eq!(stems.len(), 2);
+  assert_eq!(stems[0]["name"], "");
+  assert_eq!(stems[0]["arg"], "300");
+  assert_eq!(stems[0]["arg_from_name"], "128");
+  assert_eq!(stems[1]["arg_from_name"], "129");
+}
+
+#[test]
+fn json_preserves_large_times_escaping_paths_aliases_and_attribute_boundaries() {
+  let dir = test_dir();
+  let path = dir.path().join("json.fst");
+  let mut writer = Writer::create(&path, true)
+    .unwrap()
+    .version("version \"quoted\" \\ path")
+    .unwrap()
+    .timescale(-12)
+    .timezero(-9_007_199_254_740_993);
+  writer
+    .set_scope(scope_type::VCD_MODULE, "top.with.dot", "component\"\\")
+    .unwrap();
+  writer
+    .set_scope(scope_type::VCD_MODULE, "inner", "")
+    .unwrap();
+  writer
+    .set_attr_begin(
+      attr_type::MISC,
+      misc_type::COMMENT,
+      "comment \"\\\n雪",
+      u64::MAX,
+    )
+    .unwrap();
+  let signal = "data\"\\雪";
+  let handle = writer
+    .create_var(var_type::VCD_REG, var_dir::OUTPUT, 4, signal, None)
+    .unwrap();
+  writer
+    .create_var(var_type::VCD_REG, var_dir::INPUT, 4, "alias", Some(handle))
+    .unwrap();
+  writer.set_attr_end();
+  writer.set_upscope();
+  writer.set_upscope();
+  writer.emit_time_change(9_007_199_254_740_995).unwrap();
+  writer.emit_value_change(handle, b"0011").unwrap();
+  writer.emit_time_change(9_007_199_254_741_001).unwrap();
+  drop(writer);
+
+  let json = json_output(&path, &["--all"]);
+  assert_eq!(json["schema"], "readfst");
+  assert_eq!(json["schema_version"], 1);
+  assert_eq!(json["metadata"]["version"], "version \"quoted\" \\ path");
+  assert_eq!(json["metadata"]["timescale_exponent"], -12);
+  assert_eq!(json["metadata"]["timezero"], "-9007199254740993");
+  assert_eq!(json["metadata"]["start_time"], "9007199254740995");
+  assert_eq!(json["metadata"]["end_time"], "9007199254741001");
+  assert_eq!(json["metadata"]["num_vars"], "2");
+  let vars = json["variables"].as_array().unwrap();
+  assert_eq!(vars.len(), 2);
+  assert_eq!(
+    vars[0]["path"],
+    serde_json::json!(["top.with.dot", "inner", signal])
+  );
+  assert_eq!(vars[0]["width"], 4);
+  assert_eq!(vars[0]["handle"], u32::from(handle));
+  assert_eq!(vars[0]["is_alias"], false);
+  assert!(vars[0]["alias_of"].is_null());
+  assert_eq!(vars[1]["handle"], vars[0]["handle"]);
+  assert_eq!(vars[1]["is_alias"], true);
+  assert_eq!(vars[1]["alias_of"], vars[0]["name"]);
+  assert_eq!(vars[1]["canonical_name"], vars[0]["name"]);
+  assert_eq!(
+    json["scopes"][1]["path"],
+    serde_json::json!(["top.with.dot", "inner"])
+  );
+  assert_eq!(json["scopes"][1]["full_name"], "top.with.dot.inner");
+  let attrs = json["attributes"].as_array().unwrap();
+  assert!(attrs.iter().any(|attr| attr["event"] == "begin"
+    && attr["data"]["name"] == "comment \"\\\n雪"
+    && attr["data"]["arg"] == "18446744073709551615"));
+  assert!(
+    attrs
+      .iter()
+      .any(|attr| attr["event"] == "end" && attr.get("data").is_none())
+  );
+  assert_eq!(json, json_output(&path, &["--all"]));
+}
+
+#[test]
+fn filtered_alias_retains_canonical_name_in_json_and_table_modes() {
+  let dir = test_dir();
+  let path = dir.path().join("filter.fst");
+  let mut writer = Writer::create(&path, true).unwrap();
+  writer.set_scope(scope_type::VCD_MODULE, "top", "").unwrap();
+  let handle = writer
+    .create_var(var_type::VCD_WIRE, var_dir::OUTPUT, 1, "data", None)
+    .unwrap();
+  writer
+    .create_var(var_type::VCD_WIRE, var_dir::INPUT, 1, "alias", Some(handle))
+    .unwrap();
+  writer.set_upscope();
+  writer.emit_time_change(0).unwrap();
+  writer.emit_value_change(handle, b"0").unwrap();
+  writer.emit_time_change(10).unwrap();
+  drop(writer);
+
+  let json = json_output(&path, &["--vars", "--signals", "^top\\.alias$"]);
+  assert_eq!(json["variables"].as_array().unwrap().len(), 1);
+  assert_eq!(json["variables"][0]["canonical_name"], "top.data");
+  assert_eq!(json["variables"][0]["alias_of"], "top.data");
+  for absent in ["metadata", "scopes", "attributes"] {
+    assert!(json.get(absent).is_none());
+  }
+  let no_alias = json_output(&path, &["--vars", "--signals", "alias$", "--no-aliases"]);
+  assert_eq!(no_alias["variables"], serde_json::json!([]));
+  for (extra, expected) in [
+    (&["--names-only"][..], "top.alias\n"),
+    (&[][..], "top.data"),
+  ] {
+    let result = Command::new(env!("CARGO_BIN_EXE_readfst"))
+      .arg(&path)
+      .args(["--vars", "--signals", "alias$"])
+      .args(extra)
+      .output()
+      .unwrap();
+    assert!(result.status.success());
+    assert!(String::from_utf8(result.stdout).unwrap().contains(expected));
+  }
+}
+
+#[test]
+fn rejects_incompatible_json_options_and_invalid_filters_before_opening_input() {
+  for args in [
+    vec!["--format", "json"],
+    vec!["--vars", "--format", "json", "--names-only"],
+    vec!["--metadata", "--signals", "data"],
+    vec!["--vars", "--signals", "["],
+  ] {
+    let result = Command::new(env!("CARGO_BIN_EXE_readfst"))
+      .arg("does-not-exist.fst")
+      .args(args)
+      .output()
+      .unwrap();
+    assert_eq!(result.status.code(), Some(2));
+    assert!(result.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("context creation"));
+  }
+}
+
+#[test]
+fn json_selected_empty_sections_are_arrays() {
+  let dir = test_dir();
+  let path = dir.path().join("empty-json.fst");
+  let mut writer = Writer::create(&path, true).unwrap();
+  writer.emit_time_change(0).unwrap();
+  writer.emit_time_change(10).unwrap();
+  drop(writer);
+  let json = json_output(&path, &["--all"]);
+  assert_eq!(json["variables"], serde_json::json!([]));
+  assert_eq!(json["scopes"], serde_json::json!([]));
+  assert_eq!(json["attributes"], serde_json::json!([]));
+  let metadata = json_output(&path, &["--metadata"]);
+  assert!(metadata.get("variables").is_none());
+  assert!(metadata.get("scopes").is_none());
+  assert!(metadata.get("attributes").is_none());
 }

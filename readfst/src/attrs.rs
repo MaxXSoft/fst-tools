@@ -2,25 +2,29 @@ use crate::section::{Item, Section};
 use fstapi::{ArrayType, EnumValueType, MiscType, PackType};
 use fstapi::{Attr, Hier, Reader, Result};
 use fstapi::{array_type, attr_type, enum_value_type, misc_type, pack_type};
+use serde::Serialize;
 use tabled::Tabled;
 
 /// Attribute information.
-#[derive(Tabled)]
+#[derive(Serialize, Tabled)]
 pub struct AttrInfo {
   #[tabled(rename = "Type")]
+  #[serde(rename = "type")]
   ty: &'static str,
   #[tabled(rename = "Subtype")]
   subtype: &'static str,
   #[tabled(rename = "Name")]
   name: String,
   #[tabled(rename = "Arg")]
+  #[serde(serialize_with = "crate::json::decimal")]
   arg: u64,
   #[tabled(rename = "Arg From Name")]
+  #[serde(serialize_with = "crate::json::decimal")]
   arg_from_name: u64,
 }
 
 impl AttrInfo {
-  fn new(attr: Attr) -> Result<Self> {
+  pub(crate) fn new(attr: Attr) -> Result<Self> {
     let (ty, subtype) = match attr.ty() {
       attr_type::MISC => (
         "Misc",
