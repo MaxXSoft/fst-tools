@@ -1,10 +1,12 @@
-use crate::Cli;
+use crate::{Cli, output::Output};
 use fstapi::{Handle, Reader, VarType, var_type};
 use regex::Regex;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::io::Write;
+use std::ops::ControlFlow;
+use std::time::Instant;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -113,10 +115,8 @@ impl State {
 }
 
 /// Emits one complete JSON record per line and propagates output failures.
-fn line(output: &mut impl Write, record: &Value) -> Result<()> {
-  serde_json::to_writer(&mut *output, record)?;
-  output.write_all(b"\n")?;
-  Ok(())
+fn line(output: &mut Output<impl Write>, record: &Value) -> Result<bool> {
+  Ok(output.record(record)?)
 }
 
 /// Selects handles first, then collects canonical paths and every alias.
@@ -198,7 +198,7 @@ fn recording_interruption(activity: &[(u64, bool)], start: u64, end: u64) -> boo
 
 /// Emits state immediately before start, separately from all callbacks at start.
 fn initial(
-  output: &mut impl Write,
+  output: &mut Output<impl Write>,
   signals: &[Signal],
   states: &mut [State],
   activity: &[(u64, bool)],
@@ -226,7 +226,7 @@ fn initial(
 }
 
 /// Runs a masked streaming query with explicit boundary and truncation records.
-pub(super) fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
+pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
   let mut reader = Reader::open(&cli.input).map_err(|error| error.to_string())?;
   let start = cli.start.unwrap_or(reader.start_time());
   let end = cli.end.unwrap_or(reader.end_time());
@@ -269,14 +269,14 @@ pub(super) fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
   line(
     output,
     &json!({
-      "type": "header", "schema": "queryfst", "schema_version": 1,
+      "type": "header", "schema": "queryfst", "schema_version": 2,
       "start": start.to_string(), "end": end.to_string(),
       "trace_start": reader.start_time().to_string(), "trace_end": reader.end_time().to_string(),
       "timescale_exponent": reader.timescale(), "timezero": reader.timezero().to_string(),
       "interval": "inclusive", "initial_semantics": "latest_callback_strictly_before_start",
       "event_order": "libfst_callback_order", "limit": cli.limit.to_string(),
       "mode": if cli.summary { "scalar_summary" } else { "events" },
-      "scan_start": scan_start.to_string(), "early_termination": false,
+      "scan_start": scan_start.to_string(), "early_termination": true,
     }),
   )?;
   for signal in &signals {
@@ -315,78 +315,128 @@ pub(super) fn run(cli: Cli, output: &mut impl Write) -> Result<()> {
   let mut matched = 0u64;
   let mut emitted = 0u64;
   let mut callback_error = None;
-  reader
-    .for_each_block(|time, handle, value, _| {
-      if callback_error.is_some() {
-        return;
-      }
-      let result = (|| -> Result<()> {
-        callbacks += 1;
-        if !initialized && time >= start {
-          initial(output, &signals, &mut states, &activity, start)?;
-          initialized = true;
+  let started = Instant::now();
+  let mut reason = None;
+  let mut last_callback_time = None;
+  let mut processed_through = None;
+  let skip = cli.max_callbacks == Some(0) || cli.max_duration_ms == Some(0);
+  if skip {
+    reason = Some(if cli.max_callbacks == Some(0) {
+      "callback_budget_exhausted"
+    } else {
+      "duration_budget_exhausted"
+    });
+  }
+  if !skip {
+    reader
+      .for_each_block_controlled(|time, handle, value, _| {
+        if last_callback_time != Some(time) {
+          processed_through = time.checked_sub(1).filter(|t| *t >= start);
         }
+        last_callback_time = Some(time);
         if time > end {
-          return Ok(());
+          return ControlFlow::Break(());
         }
-        let index = indices[&handle];
-        let state = &mut states[index];
-        if time < start {
-          state.previous = Some(value.to_vec());
-          state.source_time = Some(time);
-          return Ok(());
+        if cli
+          .max_duration_ms
+          .is_some_and(|n| started.elapsed().as_millis() >= u128::from(n))
+        {
+          reason = Some("duration_budget_exhausted");
+          return ControlFlow::Break(());
         }
-        matched += 1;
-        if cli.summary {
-          state.account(time);
-          if state.previous.as_deref().is_some_and(|old| old != value) {
-            state.transitions += 1;
+        let result = (|| -> Result<()> {
+          callbacks += 1;
+          if !initialized && time >= start {
+            initial(output, &signals, &mut states, &activity, start)?;
+            initialized = true;
           }
-          state.previous = Some(value.to_vec());
-          state.callbacks += 1;
-        } else if emitted < cli.limit {
-          let mut record = signals[index].record("event", time, Some(value), None)?;
-          record["sequence"] = emitted.to_string().into();
-          line(output, &record)?;
-          emitted += 1;
+          if time > end {
+            return Ok(());
+          }
+          let index = indices[&handle];
+          let state = &mut states[index];
+          if time < start {
+            state.previous = Some(value.to_vec());
+            state.source_time = Some(time);
+            return Ok(());
+          }
+          matched += 1;
+          if cli.summary {
+            state.account(time);
+            if state.previous.as_deref().is_some_and(|old| old != value) {
+              state.transitions += 1;
+            }
+            state.previous = Some(value.to_vec());
+            state.callbacks += 1;
+          } else if emitted < cli.limit && !output.truncated {
+            let mut record = signals[index].record("event", time, Some(value), None)?;
+            record["sequence"] = emitted.to_string().into();
+            if line(output, &record)? {
+              emitted += 1;
+            }
+          }
+          Ok(())
+        })();
+        if let Err(error) = result {
+          callback_error = Some(error);
+          return ControlFlow::Break(());
         }
-        Ok(())
-      })();
-      if let Err(error) = result {
-        callback_error = Some(error);
-      }
-    })
-    .map_err(|error| error.to_string())?;
+        if cli.max_callbacks.is_some_and(|n| callbacks >= n) {
+          reason = Some("callback_budget_exhausted");
+          return ControlFlow::Break(());
+        }
+        ControlFlow::Continue(())
+      })
+      .map_err(|error| error.to_string())?;
+  }
+  let complete = reason.is_none();
+  if complete {
+    processed_through = Some(end);
+  }
   if let Some(error) = callback_error {
     return Err(error);
   }
-  if !initialized {
+  if !initialized && complete {
     initial(output, &signals, &mut states, &activity, start)?;
   }
-  if cli.summary {
+  let mut summary_rows = 0u64;
+  if cli.summary && complete {
     for (signal, state) in signals.iter().zip(&mut states) {
       state.account(end);
       let residency: BTreeMap<_, _> = ["0", "1", "x", "z", "other", "unavailable"]
         .into_iter()
         .zip(state.residency.map(|duration| duration.to_string()))
         .collect();
-      line(
+      if summary_rows >= cli.limit {
+        continue;
+      }
+      if line(
         output,
         &json!({
           "type": "scalar_summary", "handle": u32::from(signal.handle),
           "duration_ticks": (end - start).to_string(), "residency_ticks": residency,
           "value_transitions": state.transitions.to_string(), "callbacks": state.callbacks.to_string(),
         }),
-      )?;
+      )? {
+        summary_rows += 1;
+      }
     }
   }
-  line(
-    output,
-    &json!({
-      "type": "summary", "complete": true, "selected_handles": signals.len(),
+  let truncated = if cli.summary {
+    complete && summary_rows < signals.len() as u64
+  } else {
+    matched > emitted
+  };
+  output.finish(json!({
+      "type": "summary", "complete": complete, "reason": reason,
+      "output_reason": truncated.then_some("row_budget_exhausted"), "status": if complete { "complete" } else { "partial" },
+      "processed_through": processed_through.map(|t| t.to_string()), "last_callback_time": last_callback_time.map(|t| t.to_string()),
+      "unprocessed_input": !complete, "aggregate_final": complete, "output_truncated": truncated, "selected_handles": signals.len(),
       "decoded_callbacks": callbacks.to_string(), "matching_callbacks": matched.to_string(),
-      "emitted_events": emitted.to_string(), "omitted_events": if cli.summary { "0".to_string() } else { (matched - emitted).to_string() },
-      "truncated": !cli.summary && matched > emitted,
-    }),
-  )
+      "emitted_events": emitted.to_string(), "emitted_rows": (emitted + summary_rows).to_string(),
+      "omitted_events": complete.then(|| if cli.summary { "0".to_string() } else { (matched - emitted).to_string() }),
+      "observed_omitted_events": if cli.summary { "0".to_string() } else { (matched - emitted).to_string() },
+      "truncated": truncated,
+    }))?;
+  Ok(())
 }

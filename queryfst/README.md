@@ -1,135 +1,238 @@
 # queryfst
 
-Query selected FST signals as JSON Lines without converting the full waveform to
-VCD or accumulating the event history in memory. This is a generic, read-only
-query primitive for scripts and agents; it does not infer clock cycles,
-instruction retirement, or hardware bottlenecks from signal names.
+Inspect FST value changes or run a finite SQL query over sampled signal state.
+Text output is the default. `--format json` (or `--json`) enables a versioned
+JSON Lines stream; `jsonl` is an alias for the same format.
 
 ```sh
-cargo build --release -p queryfst
-target/release/queryfst trace.fst --signal top.core.retire_valid \
-  --signal top.core.retire_pc --start 120000 --end 130000 --limit 1000
-target/release/queryfst trace.fst --signals 'top\.core\.(stall|retire_valid)$' \
-  --start 120000 --end 130000 --summary
+queryfst trace.fst --signal top.core.retire_valid --start 120000 --end 130000
+queryfst trace.fst --signals 'top\.core\.(stall|retire_valid)$' --summary --json
+queryfst trace.fst --signal top.core.retire_pc --json --max-rows 100 --max-bytes 65536
 ```
 
-At least one `--signal EXACT_PATH` or `--signals REGEX` is required. Repeated
-exact paths and the regex form a union. Regex matching uses Rust's `regex` syntax;
-anchor the expression with `^` and `$` when a whole-path match is needed. Every
-exact path must exist. A selection matching no signals is an error. Aliases
-select their physical handle; selecting several aliases never duplicates events.
+Raw selection uses repeated `--signal EXACT_PATH` and/or `--signals REGEX`.
+Their union selects physical handles, so aliases never duplicate callbacks.
+Missing exact paths and empty regex selections are errors. Anchoring a regex
+with `^` and `$` requests a whole-path match.
 
-## JSONL schema version 1
+## SQL sampling
 
-Every line is one JSON object with a `type` field. The stream contains:
+Bind short SQL names to exact FST hierarchy paths, using a JSON object or repeated
+`--bind NAME=PATH` arguments. Signal names remain data rather than SQL syntax. Binding identifiers are case-sensitive.
+For example, save this object as `bindings.json`:
 
-1. `header`: schema name/version, requested interval, trace bounds, timescale,
-   timezero, mode, output limit, ordering/initial-state semantics and scan start.
-2. `signal`: physical `handle`, canonical `path`, all `aliases`, bit `width`,
-   libfst numeric `var_type`, and value `encoding`. Signal metadata is ordered by
-   handle. Names are UTF-8 strings; invalid UTF-8 hierarchy names are rejected.
-3. `dump_activity`: all recorded dump-enable changes, retaining file order.
-   Initial recording state is active before the first entry. Recording disabled
-   does not mean the signals were constant.
-4. `initial`: one value per selected handle at the requested start boundary.
-5. `event`: at most `--limit` callback records, or `scalar_summary` records in
-   summary mode.
-6. `summary`: `complete: true`, selected handle count, decoded/matching callback
-   counts, emitted/omitted event counts and `truncated`.
+```json
+{
+  "pc": "top.core.retire_pc",
+  "retired": "top.core.retire_valid",
+  "reset": "top.reset",
+  "mode": "top.core.mode",
+  "events": "top.core.perf_events"
+}
+```
 
-Times, timezero, durations, sequence numbers and potentially large counters are
-**decimal strings**. Handles, widths, small schema/type identifiers and the
-timescale exponent are JSON integers. Raw times are FST ticks; one tick is
-`10 ** timescale_exponent` seconds. `timezero` is exposed as metadata and is not
-silently added to callback timestamps.
+```sh
+queryfst trace.fst --bindings bindings.json --period 2 --phase 0 \
+  --sql 'SELECT mode, COUNT(*) AS cycles, SUM(retired) AS retired_count
+         FROM samples WHERE reset = 0 GROUP BY mode' --json
 
-`event` and `initial` records refer to the signal metadata by `handle`. Their
-`value` is a string interpreted using `encoding`:
+queryfst trace.fst --bindings bindings.json --period 2 --phase 0 \
+  --sql 'SELECT pc, COUNT(*) AS retired_count, MIN(tick) AS first_tick,
+                MAX(tick) AS last_tick
+         FROM samples WHERE reset = 0 AND retired = 1
+         GROUP BY pc ORDER BY retired_count DESC LIMIT 20' --json
+```
 
-| Encoding | Value |
+Use `--sql-file FILE` for larger queries. Every query reads the virtual `samples`
+table. `tick` is the raw timestamp and `sample_index` is a zero-based ordinal in
+the requested sampling window. These names cannot be rebound.
+
+Sampling is explicit: `--period P --phase Q` selects ticks satisfying
+`t % P == Q`, with `P > 0` and `0 <= Q < P`. Phase is anchored to absolute trace
+time, not to `--start`. All selected callbacks at a timestamp are applied before
+a sample at that timestamp. Constant signals are carried forward, and samples
+are generated even when no selected signal changes. This differs from counting
+callbacks or PC transitions. Periodic sampling assumes the caller knows the
+clock cadence; it does not infer edges, gated clocks, HDL delta cycles, or the
+meaning of retirement from signal names.
+
+For the Fuxi example, the measured contract was period 2, phase 0: settled
+low-phase snapshots before the next odd rising edge. That choice is specific to
+that simulation. Other testbenches may require a different period/phase.
+
+### Supported SQL
+
+One `SELECT ... FROM samples` statement supports:
+
+- `WHERE`, `GROUP BY`, `ORDER BY` and integer `LIMIT`.
+- `COUNT(*)`, `COUNT(expr)`, `SUM`, `MIN`, and `MAX`.
+- Integer arithmetic, comparisons, boolean operations, bitwise operators,
+  `CASE`, `BETWEEN`, `IN`, and null tests.
+- Explicit projected expressions and `AS` names. `SELECT *` is intentionally
+  rejected so the result schema and selected data are reviewable.
+- `raw(value)`, `known(value)`/`is_known(value)`, `bit(value, index)`, `hex`,
+  `abs`, and `coalesce`.
+
+Joins, subqueries, CTEs, DDL/DML, window `OVER` clauses, `HAVING`, `DISTINCT`,
+floating point expressions, and unsupported modifiers are rejected. Parsing
+uses `sqlparser`; execution is a small streaming Rust engine, not a database.
+SQL integers use checked signed 128-bit arithmetic. Known logic vectors are
+interpreted as unsigned values; signed RTL interpretation is not inferred.
+Integer division truncates toward zero. Arithmetic errors are explicit errors.
+Only fixed-width logic bindings are accepted in sampling mode. Raw event mode
+also supports real, EVCD and variable-length values.
+
+Four-state values remain available as bit strings. Unknown numeric operands
+propagate NULL, so WHERE accepts only definite true. `known(value)` distinguishes
+unknown/unobserved values; `raw(signal)` retains width and leading zeroes.
+Numeric operations on known values exceeding the signed 128-bit range fail
+rather than truncate. Numeric ordering/group keys and `changed` use the same
+comparison range; use `changed(raw(wide_signal))` or group/order by `raw(wide_signal)`
+for exact arbitrary-width bit-string comparisons. All supplied bindings are
+decoded, even when the SQL references only some of them; small binding maps
+reduce scanning work. Temporal expressions begin at the requested sample window;
+the prior waveform state is reconstructed, but earlier handshakes/history are
+not replayed into those expressions.
+
+### Temporal predicates and context
+
+These functions advance once per sampled row **before WHERE**, including rows
+that the predicate rejects. Repeated uses of the same expression share its state.
+
+| Function | Meaning |
 | --- | --- |
-| `bits` | Raw logic characters, preserving widths, leading zeroes and `x`/`z` |
-| `bytes_hex` | Lowercase hex of arbitrary variable-length bytes, including NUL and non-UTF-8 |
-| `real_f64_le_hex` | Eight little-endian IEEE-754 bytes as hex, preserving exact FST double bits |
-| `evcd` | Raw EVCD value and drive strengths, including their separators |
+| `lag(value)` | Value on the previous sample; initially NULL |
+| `changed(value)` | Value differs from the previous sample, including first known observation |
+| `hold(value, enable)` | Most recent value accepted when enable was true, including this sample |
+| `run_length(predicate)` | Consecutive true samples; false resets to zero; unknown resets and returns NULL |
+| `runs(predicate)` | True only on the first sample of a true run |
+| `timeouts(request, response, cycles [, key])` | Count of pending accepted requests whose inclusive response deadline expires on this sample |
 
-An unavailable initial value is JSON `null`. Real values use libfst's native
-double callback; they are not rounded through a decimal representation. All
-signals are represented losslessly within the FST reader's callback model.
+For example, find the tenth cycle of each `valid && !ready` run:
 
-## Boundaries, initial state and ordering
+```sh
+queryfst trace.fst --bind valid=top.valid --bind ready=top.ready --period 2 \
+  --sql 'SELECT tick, valid, ready FROM samples
+         WHERE run_length(valid = 1 AND ready = 0) = 10' --before 5 --after 3 --json
+```
 
-`--start` and `--end` are inclusive raw timestamps. Defaults are the trace
-bounds. Reversed or out-of-trace bounds are rejected, rather than silently
-clipped. A point query with equal bounds is allowed.
+`--before` and `--after` include neighboring samples for projection queries,
+append a `__match` boolean, and merge overlapping windows without duplicate rows.
+They are sample counts, not raw tick distances. `--matches first|last|all` selects
+the trigger before expanding its context (default `all`). Context is clipped to the
+requested time window, and the summary reports unavailable leading/trailing
+context. Aggregation and nonchronological sorting cannot be combined with context.
 
-`initial` contains the latest callback value **strictly before** start. Its
-`time` is the requested start and its `source_time` is the callback observation
-time. That observation can be a libfst block-frame snapshot; it is not
-necessarily the time of a signal transition. `value` and `source_time` are null
-when no prior callback was available, including at trace start or an exact block
-boundary. A recording gap after the prior observation also invalidates it.
+For first/last results without context, use ascending `ORDER BY tick LIMIT 1`,
+descending `ORDER BY tick LIMIT 1`, or `--matches first|last|all`. For context,
+use `--matches first --before 20 --after 10`, for example. SQL LIMIT is rejected
+with context/match selection so it cannot accidentally consume the preceding
+context rows and omit the trigger. First mode stops after its following window;
+last mode retains a bounded candidate window until the scan completes. A partial
+last-match result is provisional. A condition that remains true matches every
+sampled row; use `runs(condition)` for one result per episode.
 
-All callbacks at start are then emitted as ordinary `event` records. Apply them
-in `sequence` order to obtain the observed state at start. This avoids inventing
-a prior state or collapsing same-timestamp callbacks. Equal-timestamp ordering
-is libfst callback ordering, **not an HDL delta-cycle ordering guarantee**.
-Events may include repeated values or frame snapshots; callback counts are not
-automatically value-transition counts. If output is truncated, even the complete
-set of callbacks at start may be absent.
+For a ready/valid bus, pass accepted handshakes to `timeouts`, not bare valid
+levels. The optional key pairs responses with the oldest pending request of the
+same key. A response on the deadline sample succeeds; a simultaneous request and
+response can complete immediately. At EOF, pending requests are unresolved, not
+reported as timeouts. Unknown handshake/key values invalidate pending evidence;
+the summary exposes that uncertainty. Pending request storage shares the
+`--max-buffer-rows` cardinality budget. Timed-out requests retain bounded FIFO
+placeholders until a response arrives, so a late response does not satisfy a
+newer request. The optional key applies to both channels on that sample; buses
+with different simultaneous request/response IDs need an appropriate extraction
+or separate per-ID queries.
 
-The C reader's time-range option skips whole blocks; callbacks within an
-included block can be earlier than start or later than end. `queryfst` retains
-prior values for initial state and applies exact bounds itself. Fixed-size
-signals can recover their starting value from block snapshots. Variable-length
-signals have no such snapshots, so selecting any of them makes decoding start
-at trace start. A prior recording gap also requires scanning from trace start:
-a later block snapshot can otherwise hide the fact that a value predates the
-gap. The header's `scan_start` exposes these potentially expensive fallbacks.
+A UART with separate address/data handshakes can be queried with
+`hold(awaddr, awvalid = 1 AND awready = 1)` in the data-channel predicate. Callers
+must choose a transaction model appropriate to their bus; this primitive does
+not infer AXI ordering or transaction IDs.
 
-## Scalar summaries
+## Boundaries and recording gaps
 
-`--summary` accepts only scalar state signals (one-bit logic, excluding VCD
-events). It emits one `scalar_summary` per physical handle, with:
+`--start` and `--end` are inclusive raw FST ticks and default to trace bounds.
+Reversed or out-of-trace windows are errors. Point queries are supported.
+Timescale and timezero are metadata; timezero is not added to callback timestamps.
 
-- `residency_ticks`: elapsed ticks spent in `0`, `1`, `x`, `z`, `other`, or
-  `unavailable` state; the sum equals `end - start`.
-- `value_transitions`: unequal consecutive observed values with a known prior
-  value. Changes at both inclusive boundaries count; an initial observation from
-  an unavailable state does not count as a transition.
-- `callbacks`: inclusive in-range callback count, including repeated values.
+Raw `initial` records contain the latest callback **strictly before** start.
+Their `source_time` can be a libfst block-frame snapshot, rather than an actual
+transition. Unknown initial state is null. All callbacks at start follow as
+ordinary events in libfst callback order. This order does not recover HDL delta
+cycles. Repeated values and block snapshots can occur, so callbacks are not
+necessarily transitions.
 
-Residency measures continuous elapsed time over `[start, end)`, so an event at
-end can change the transition count but adds no duration. It is **not a cycle
-count** or edge-sampled assertion count. Multiple same-timestamp transitions
-add no elapsed time. Intervals intersecting disabled dumping are rejected for
-summary mode because their state residency cannot be inferred. An observation
-before a prior dumping gap cannot establish state after that gap. This includes
-off/on pairs at the same timestamp, which can hide changes without consuming
-any elapsed ticks. Summary mode also rejects an off entry at either inclusive
-endpoint; the ordering of blackout metadata against callbacks is not known.
+The backend skips whole blocks; the tools enforce exact bounds on callbacks.
+Variable-length signals have no frame snapshots, so raw queries selecting them
+scan from the trace start. A prior dump gap also requires reconstruction from
+trace start, invalidating observations that predate disabled recording. SQL
+sampling and scalar summaries reject recording interruptions inside the requested
+window, including zero-duration off/on pairs. Unknown history is never silently
+converted to zero.
 
-## Output and resource limits
+`--summary` in raw mode accepts one-bit state signals, excluding VCD events.
+`residency_ticks` integrates `[start,end)` and sums to `end-start`; transitions
+include both endpoints. This is elapsed residency, not sampled cycle counting.
+A work-budget interruption omits these summaries rather than claiming a final
+residency over an unobserved interval.
 
-`--limit` defaults to 10000 and bounds only `event` records. Zero emits initial
-state and final counts without events. Metadata, initial states, dump activity
-and summaries are not included in this limit. A large selected hierarchy or an
-individual wide/variable value can therefore still produce substantial output.
-Summary mode emits no events and ignores the event limit.
+## Resource budgets and completion
 
-Truncation bounds output, not decoding work: libfst has no cancellation callback.
-The traversal continues through the requested blocks to compute complete
-callback counts. The header explicitly reports `early_termination: false`.
-Application memory holds selected hierarchy names and one prior value per
-selected signal, not the trace's event history. libfst additionally allocates
-hierarchy and per-block decoding buffers; a narrow query is not a hard bound on
-process RSS or CPU time.
+| Option | Controlled resource |
+| --- | --- |
+| `--max-rows N` / `--limit N` | Output data rows; default 10000, excluding metadata/footer |
+| `--max-bytes N` | Total serialized stdout, including metadata/footer; minimum 4096 |
+| `--max-callbacks N` | Delivered value callbacks, including initial-state reconstruction |
+| `--max-samples N` | Sampled rows evaluated, including rows rejected by WHERE |
+| `--max-groups N` | Distinct aggregation keys; default 100000 |
+| `--max-buffer-rows N` | Buffered sort/context/pending-request row cardinality; default 100000 |
+| `--max-duration-ms N` | Cooperative scan/sample duration budget |
 
-Successful execution ends with a `summary` containing `complete: true`. An
-argument, input, decoding, or output error exits nonzero and prints a diagnostic
-to stderr. A decoding/output failure can leave a partial JSONL stream; consumers
-must check exit status and the final completion record before trusting counts.
-Limit truncation is a successful query and is explicitly marked `truncated`.
+Bytes are checked on whole records, reserving 2048 bytes for a final summary.
+No line is split. A large metadata record can itself consume the available
+budget; inspect `output_truncated` before assuming every signal/column was emitted.
+Token budgets and continuation are not implemented.
 
-Tests run with `cargo test -p queryfst` and generate their small FST fixtures in
-Cargo's ignored build directory.
+SQL LIMIT is part of the query, whereas `--max-rows` is an output budget. Top-PC
+rankings and final aggregates need a complete window even if only one row is
+returned. A raw row/byte output cap continues scanning for exact callback counts;
+SQL projection output caps can stop traversal. Work limits stop the underlying C
+reader through a build-local cancellation extension. Loading/decompressing a
+block is not preempted, so the deadline is cooperative, not a hard wall-time
+limit. Opening/hierarchy discovery, SQL planning, final sorting and result
+serialization are outside this duration budget. These limits do not cap process RSS, hierarchy sizes, individual value
+widths, SQL expression sizes, or libfst's block buffers. Group/row limits bound
+cardinality, not allocated bytes.
+
+A final `summary` separates `complete`, `output_truncated`, `aggregate_final`,
+and `unprocessed_input`. A partial aggregate describes only observed samples,
+not the entire requested range. An absence of matches in a partial result does
+not establish an absence in the input. `processed_through` identifies observed
+sample coverage; callbacks at a budget-interrupted timestamp are not sampled
+until the entire timestamp is known. No continuation token is supplied.
+
+## JSON Lines schema version 2
+
+Every stdout line is an object with a `type` field:
+
+- Raw mode: `header`, `signal`, `dump_activity`, `initial`, `event` or
+  `scalar_summary`, then `summary`.
+- Sampling mode: `header`, `columns`, zero or more `row` records, then `summary`.
+  A row's `values` array follows the ordered `columns` names. Empty results still
+  provide columns. Integers, times and large counters are decimal strings;
+  booleans remain booleans, missing values are null, and unknown/wide values
+  preserve a `{"bits":"..."}` representation.
+
+Raw values use `bits`, `bytes_hex`, `real_f64_le_hex`, or `evcd` encodings.
+Native real callbacks preserve the exact eight IEEE-754 bytes in little-endian
+hex; strings preserve arbitrary bytes as hex. Handles/widths/schema identifiers
+remain JSON numbers. Version 2 adds explicit budgets and SQL result records;
+consumers of the previous JSON-only default must now pass `--format json`.
+
+Argument/query errors produce a structured `error` on stderr in JSON mode and
+exit nonzero. A decoding/output failure may leave an unfinished stdout stream.
+Consumers must check both exit status and the final summary. Budget-limited
+queries exit successfully with explicit partial/truncated status.
+
+Run `cargo test -p queryfst` for generated waveform regressions. Large traces and
+experimental result tables remain outside the repository's tracked fixtures.
