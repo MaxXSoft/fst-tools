@@ -1,0 +1,107 @@
+--- a/fstapi.c
++++ b/fstapi.c
+@@ -4841,6 +4841,20 @@
+     return (fstReaderIterBlocks2(ctx, value_change_callback, NULL, user_callback_data_pointer, fv));
+ }
+ 
++int fstToolsReaderIterBlocksControlled(fstReaderContext *ctx,
++                         void (*value_change_callback)(void *user_callback_data_pointer,
++                                                       uint64_t time,
++                                                       fstHandle facidx,
++                                                       const unsigned char *value),
++                         void (*value_change_callback_varlen)(void *user_callback_data_pointer,
++                                                              uint64_t time,
++                                                              fstHandle facidx,
++                                                              const unsigned char *value,
++                                                              uint32_t len),
++                         void *user_callback_data_pointer,
++                         FILE *fv,
++                         const int *cancelled);
++
+ int fstReaderIterBlocks2(fstReaderContext *ctx,
+                          void (*value_change_callback)(void *user_callback_data_pointer,
+                                                        uint64_t time,
+@@ -4853,6 +4867,24 @@
+                                                               uint32_t len),
+                          void *user_callback_data_pointer,
+                          FILE *fv)
++{
++    return fstToolsReaderIterBlocksControlled(ctx, value_change_callback,
++        value_change_callback_varlen, user_callback_data_pointer, fv, NULL);
++}
++
++int fstToolsReaderIterBlocksControlled(fstReaderContext *ctx,
++                         void (*value_change_callback)(void *user_callback_data_pointer,
++                                                       uint64_t time,
++                                                       fstHandle facidx,
++                                                       const unsigned char *value),
++                         void (*value_change_callback_varlen)(void *user_callback_data_pointer,
++                                                              uint64_t time,
++                                                              fstHandle facidx,
++                                                              const unsigned char *value,
++                                                              uint32_t len),
++                         void *user_callback_data_pointer,
++                         FILE *fv,
++                         const int *cancelled)
+ {
+     struct fstReaderContext *xc = (struct fstReaderContext *)ctx;
+ 
+@@ -4869,7 +4901,7 @@
+     fst_off_t indx_pntr, indx_pos;
+     fst_off_t *chain_table = NULL;
+     uint32_t *chain_table_lengths = NULL;
+-    unsigned char *chain_cmem;
++    unsigned char *chain_cmem = NULL;
+     unsigned char *pnt;
+     long chain_clen;
+     fstHandle idx, pidx = 0, i;
+@@ -4907,6 +4939,9 @@
+         uint32_t *tc_head = NULL;
+         uint32_t tc_head_items = 0;
+         traversal_mem_offs = 0;
++        chain_cmem = NULL;
++        if (cancelled && *cancelled)
++            break;
+ 
+         fstReaderFseeko(xc, xc->f, blkpos, SEEK_SET);
+ 
+@@ -5118,6 +5153,8 @@
+                 }
+ 
+                 for (idx = 0; idx < frame_maxhandle; idx++) {
++                    if (cancelled && *cancelled)
++                        break;
+                     int process_idx = idx / 8;
+                     int process_bit = idx & 7;
+ 
+@@ -5248,6 +5285,8 @@
+                 }
+ 
+                 free(mu);
++                if (cancelled && *cancelled)
++                    goto block_err;
+                 fstReaderFseeko(xc, xc->f, -((fst_off_t)frame_clen), SEEK_CUR);
+             }
+         }
+@@ -5582,7 +5621,12 @@
+                 }
+             }
+ 
++            if (cancelled && *cancelled)
++                goto block_err;
++
+             while (tc_head[i]) {
++                if (cancelled && *cancelled)
++                    goto block_err;
+                 idx = tc_head[i] - 1;
+                 vli = fstGetVarint32(mem_for_traversal + headptr[idx], &skiplen);
+ 
+@@ -5885,6 +5929,8 @@
+         free(mem_for_traversal);
+         mem_for_traversal = NULL;
+ 
++        if (cancelled && *cancelled)
++            break;
+         secnum++;
+         if (secnum == xc->vc_section_count)
+             break; /* in case file is growing, keep with original block count */

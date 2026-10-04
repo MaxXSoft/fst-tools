@@ -3,7 +3,64 @@ mod common;
 use common::*;
 use fstapi::{Hier, Reader, var_dir, var_type, writer_pack_type};
 use std::ffi::CStr;
+use std::ops::ControlFlow;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+
+#[test]
+fn controlled_traversal_cancels_fixed_variable_and_frame_callbacks_and_restarts() {
+  let dir = TestDir::new();
+  let path = dir.path("cancel.fst");
+  let mut writer = fstapi::Writer::create(&path, true).unwrap();
+  let fixed = writer
+    .create_var(var_type::VCD_WIRE, var_dir::OUTPUT, 1, "fixed", None)
+    .unwrap();
+  let variable = writer
+    .create_var(var_type::GEN_STRING, var_dir::OUTPUT, 0, "bytes", None)
+    .unwrap();
+  for time in 0..100 {
+    writer.emit_time_change(time).unwrap();
+    writer
+      .emit_value_change(fixed, if time % 2 == 0 { b"0" } else { b"1" })
+      .unwrap();
+    writer
+      .emit_var_len_value_change(variable, b"payload")
+      .unwrap();
+    if time == 50 {
+      writer.flush();
+    }
+  }
+  writer.emit_time_change(100).unwrap();
+  drop(writer);
+  for (handle, start) in [(fixed, 0), (variable, 0), (fixed, 80)] {
+    let mut reader = Reader::open(&path).unwrap();
+    reader.set_mask(handle);
+    reader.set_time_range_limit(start, 100);
+    let mut full = 0;
+    reader.for_each_block(|_, _, _, _| full += 1).unwrap();
+    assert!(full > 1);
+    for _ in 0..8 {
+      let mut calls = 0;
+      let complete = reader
+        .for_each_block_controlled(|_, _, _, _| {
+          calls += 1;
+          ControlFlow::Break(())
+        })
+        .unwrap();
+      assert!(!complete);
+      assert_eq!(calls, 1);
+    }
+    let mut calls = 0;
+    assert!(
+      reader
+        .for_each_block_controlled(|_, _, _, _| {
+          calls += 1;
+          ControlFlow::Continue(())
+        })
+        .unwrap()
+    );
+    assert_eq!(calls, full);
+  }
+}
 
 #[test]
 fn hierarchy_items_keep_their_records_and_strings_after_iteration() {
