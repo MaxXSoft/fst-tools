@@ -3,8 +3,10 @@ use crate::types::Handle;
 use crate::utils::*;
 use crate::{BackendOperation, CallbackError, Error, LimitKind, Result, ValueKind, capi};
 use std::any::Any;
+use std::cell::Cell;
 use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
+use std::ops::ControlFlow;
 use std::os::raw;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::Path;
@@ -192,10 +194,8 @@ impl Reader {
 
   /// Runs the given callback on each block of the waveform.
   ///
-  /// If the callback panics, further callbacks are skipped while libfst finishes
-  /// the traversal, then the panic resumes after its C stack has returned.
-  /// Invalid callback data likewise skips further callbacks and returns the
-  /// first validation error after the traversal finishes.
+  /// A callback panic or invalid callback value cancels the traversal. The
+  /// panic resumes, or the error is returned, after C releases its buffers.
   ///
   /// The callback will be called when value changes, and is defined as:
   ///
@@ -205,6 +205,44 @@ impl Reader {
   /// }
   /// ```
   pub fn for_each_block<F>(&mut self, mut callback: F) -> Result<()>
+  where
+    F: FnMut(u64, Handle, &[u8], bool),
+  {
+    self
+      .for_each_block_controlled(|time, handle, value, variable| {
+        callback(time, handle, value, variable);
+        ControlFlow::Continue(())
+      })
+      .map(|_| ())
+  }
+
+  /// Visits value callbacks until exhausted or the callback returns `Break`.
+  ///
+  /// Returns `true` when traversal finished, `false` when cancelled. Cancellation
+  /// stops the C traversal and releases its buffers without unwinding through C.
+  /// No further value callbacks run after `Break`. A later traversal starts
+  /// afresh (this is not a resumable cursor).
+  ///
+  /// Cancellation is cooperative: loading/decompressing the current block can
+  /// precede the first callback, and is not preempted. A callback budget is not a
+  /// bound on compressed bytes, total CPU time, or backend allocation size.
+  pub fn for_each_block_controlled<F>(&mut self, mut callback: F) -> Result<bool>
+  where
+    F: FnMut(u64, Handle, &[u8], bool) -> ControlFlow<()>,
+  {
+    let cancelled = Cell::new(0);
+    let complete = self.visit_blocks(
+      |time, handle, value, variable| {
+        if callback(time, handle, value, variable).is_break() {
+          cancelled.set(1);
+        }
+      },
+      &cancelled,
+    )?;
+    Ok(complete)
+  }
+
+  fn visit_blocks<F>(&mut self, mut callback: F, cancelled: &Cell<raw::c_int>) -> Result<bool>
   where
     F: FnMut(u64, Handle, &[u8], bool),
   {
@@ -241,14 +279,16 @@ impl Reader {
       native_doubles: self.native_doubles,
       panic: None,
       error: None,
+      cancelled: Some(cancelled),
     };
     let ret = unsafe {
-      capi::fstReaderIterBlocks2(
+      capi::fstToolsReaderIterBlocksControlled(
         self.ctx,
         Some(c_callback::<F>),
         Some(c_callback_var_len::<F>),
         (&mut state as *mut BlockCallback<'_, F>).cast(),
         ptr::null_mut(),
+        cancelled.as_ptr(),
       )
     };
     // A callback cannot unwind through C. Let libfst finish and release its
@@ -261,7 +301,7 @@ impl Reader {
     } else if ret == 0 {
       Err(Error::BackendFailure(BackendOperation::ReadBlocks))
     } else {
-      Ok(())
+      Ok(cancelled.get() == 0)
     }
   }
 
@@ -370,6 +410,7 @@ struct BlockCallback<'a, F> {
   native_doubles: bool,
   panic: Option<Box<dyn Any + Send>>,
   error: Option<Error>,
+  cancelled: Option<&'a Cell<raw::c_int>>,
 }
 
 impl<F> BlockCallback<'_, F>
@@ -438,6 +479,11 @@ where
       Ok(Ok(())) => {}
       Ok(Err(error)) => self.error = Some(error),
       Err(payload) => self.panic = Some(payload),
+    }
+    if (self.error.is_some() || self.panic.is_some())
+      && let Some(flag) = self.cancelled
+    {
+      flag.set(1);
     }
   }
 }
@@ -839,6 +885,7 @@ mod tests {
         native_doubles,
         panic: None,
         error: None,
+        cancelled: None,
       };
       state.invoke(0, handle, data, var_len);
       let expected = Some(Error::InvalidCallbackData(handle, reason));
@@ -866,6 +913,7 @@ mod tests {
       native_doubles: false,
       panic: None,
       error: None,
+      cancelled: None,
     };
     // There is no allocation of the declared size; validation must precede
     // constructing the slice or reading any value bytes.
@@ -894,6 +942,7 @@ mod tests {
       native_doubles: false,
       panic: None,
       error: None,
+      cancelled: None,
     };
     state.invoke(0, 1, ptr::null(), Some(0));
     state.invoke(1, 1, b"ignored".as_ptr(), Some(0));

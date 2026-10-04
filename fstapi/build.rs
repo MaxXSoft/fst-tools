@@ -129,6 +129,11 @@ fn patched_fst_source(upstream: &Path, out_dir: &Path) -> PathBuf {
       include_str!("patches/windows-stdio.patch"),
       22,
     ),
+    (
+      "reader-cancel.patch",
+      include_str!("patches/reader-cancel.patch"),
+      8,
+    ),
   ];
   for (name, contents, expected_hunks) in patches {
     let contents = contents.replace("\r\n", "\n");
