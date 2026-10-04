@@ -11,7 +11,8 @@ int fstToolsReaderDumpToVcdFile(fstReaderContext *ctx, const char *path);
 int fstToolsReaderIterBlocksControlled(
     fstReaderContext *ctx,
     void (*callback)(void *, uint64_t, fstHandle, const unsigned char *),
-    void (*callback_varlen)(void *, uint64_t, fstHandle, const unsigned char *, uint32_t),
+    void (*callback_varlen)(void *, uint64_t, fstHandle, const unsigned char *,
+                            uint32_t),
     void *data, FILE *fv, const int *cancelled);
 
 #endif /* FSTAPI_FST_TOOLS_H_ */
