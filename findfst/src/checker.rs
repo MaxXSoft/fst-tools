@@ -15,6 +15,22 @@ pub enum VarInfo {
 }
 
 impl VarInfo {
+  /// The representative name selected for one physical handle.
+  pub fn name(&self, handle: Handle) -> Option<&str> {
+    match self {
+      Self::Map(vars) => vars.get(&handle).map(String::as_str),
+      Self::Array(vars) => vars.get(u32::from(handle) as usize - 1).map(String::as_str),
+    }
+  }
+
+  /// Number of selected physical handles, excluding duplicate aliases.
+  pub fn len(&self) -> usize {
+    match self {
+      Self::Map(vars) => vars.len(),
+      Self::Array(vars) => vars.len(),
+    }
+  }
+
   pub fn new(reader: &mut Reader, re: Option<Regex>) -> Result<Self> {
     if let Some(re) = re {
       // Collect matching variables.

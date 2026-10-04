@@ -1,12 +1,14 @@
-use crate::Result;
 use crate::checker::{DenseChecker, DenseOnceChecker, SparseChecker, SparseOnceChecker};
 use crate::checker::{VarChecker, VarInfo};
 use crate::matcher::{ExactMatcher, RegexHexMatcher, RegexMatcher, ValueMatcher};
-use crate::printer::{FullPrinter, NamePrinter, Printer};
-use fstapi::{Handle, Reader};
+use crate::output::Output;
+use crate::{Cli, Result};
+use fstapi::Reader;
 use regex::{Error as RegexError, bytes::Regex};
 use std::fmt;
-use std::io::{self, BufWriter, Write};
+use std::io::Write;
+use std::ops::ControlFlow;
+use std::time::{Duration, Instant};
 
 /// Errors that can occurr when constructing [`MatchInfo`].
 pub enum Error {
@@ -57,143 +59,179 @@ impl MatchInfo {
   }
 }
 
-/// Finds the matching value in the given FST waveform.
-pub fn find_value(
+/// Traversal completion is independent of whether output was truncated.
+pub(crate) struct Scan {
+  pub complete: bool,
+  pub callbacks: u64,
+  pub stop_reason: Option<&'static str>,
+  pub last_callback_time: Option<u64>,
+  pub processed_through: Option<u64>,
+}
+
+/// Finds matching callback observations within an exact inclusive window.
+pub(crate) fn find_value<W: Write>(
   reader: &mut Reader,
   value_match: MatchInfo,
   vars: VarInfo,
-  all_matches: bool,
-  names_only: bool,
-) -> Result<()> {
+  cli: &Cli,
+  start: u64,
+  end: u64,
+  output: &mut Output<'_, W>,
+) -> Result<Scan> {
   match value_match {
     MatchInfo::Regex(re, false) => {
-      find_value_m(reader, RegexMatcher::new(re), vars, all_matches, names_only)
+      find_value_m(reader, RegexMatcher::new(re), vars, cli, start, end, output)
     }
     MatchInfo::Regex(re, true) => find_value_m(
       reader,
       RegexHexMatcher::new(re),
       vars,
-      all_matches,
-      names_only,
+      cli,
+      start,
+      end,
+      output,
     ),
-    MatchInfo::Exact(e) => {
-      find_value_m(reader, ExactMatcher::new(e), vars, all_matches, names_only)
-    }
+    MatchInfo::Exact(exact) => find_value_m(
+      reader,
+      ExactMatcher::new(exact),
+      vars,
+      cli,
+      start,
+      end,
+      output,
+    ),
   }
 }
 
-/// Stage #2, with value matcher applied, determines variable checker.
-fn find_value_m<M>(
+/// Keep the existing sparse/dense and first-per-handle matching semantics.
+fn find_value_m<M: ValueMatcher, W: Write>(
   reader: &mut Reader,
-  value_matcher: M,
+  matcher: M,
   vars: VarInfo,
-  all_matches: bool,
-  names_only: bool,
-) -> Result<()>
-where
-  M: ValueMatcher,
-{
-  match (vars, all_matches) {
-    (VarInfo::Map(vars), true) => {
-      find_value_mc(reader, value_matcher, SparseChecker::new(vars), names_only)
-    }
-    (VarInfo::Map(vars), false) => find_value_mc(
+  cli: &Cli,
+  start: u64,
+  end: u64,
+  output: &mut Output<'_, W>,
+) -> Result<Scan> {
+  match (vars, cli.all_matches) {
+    (VarInfo::Map(vars), true) => scan(
       reader,
-      value_matcher,
+      matcher,
+      SparseChecker::new(vars),
+      cli,
+      start,
+      end,
+      output,
+    ),
+    (VarInfo::Map(vars), false) => scan(
+      reader,
+      matcher,
       SparseOnceChecker::new(vars),
-      names_only,
+      cli,
+      start,
+      end,
+      output,
     ),
-    (VarInfo::Array(vars), true) => {
-      find_value_mc(reader, value_matcher, DenseChecker::new(vars), names_only)
-    }
-    (VarInfo::Array(vars), false) => find_value_mc(
+    (VarInfo::Array(vars), true) => scan(
       reader,
-      value_matcher,
+      matcher,
+      DenseChecker::new(vars),
+      cli,
+      start,
+      end,
+      output,
+    ),
+    (VarInfo::Array(vars), false) => scan(
+      reader,
+      matcher,
       DenseOnceChecker::new(vars),
-      names_only,
+      cli,
+      start,
+      end,
+      output,
     ),
   }
 }
 
-/// Stage #3, with value matcher and variable checker applied, determines printer.
-fn find_value_mc<M, T, C>(
+/// Work limits stop through libfst's controlled callback rather than hiding work.
+fn scan<M, T, C, W>(
   reader: &mut Reader,
-  value_matcher: M,
-  var_checker: C,
-  names_only: bool,
-) -> Result<()>
+  matcher: M,
+  mut checker: C,
+  cli: &Cli,
+  start: u64,
+  end: u64,
+  output: &mut Output<'_, W>,
+) -> Result<Scan>
 where
   M: ValueMatcher,
   C: VarChecker<T>,
-{
-  if names_only {
-    find_value_mcp(reader, value_matcher, var_checker, NamePrinter)
-  } else {
-    find_value_mcp(reader, value_matcher, var_checker, FullPrinter)
-  }
-}
-
-/// Final stage, all generics are applied, creates callbacks and
-/// finds for matching values.
-fn find_value_mcp<M, T, C, P>(
-  reader: &mut Reader,
-  value_matcher: M,
-  mut var_checker: C,
-  printer: P,
-) -> Result<()>
-where
-  M: ValueMatcher,
-  C: VarChecker<T>,
-  P: Printer,
-{
-  let mut output = BufWriter::new(io::stdout().lock());
-  let mut output_error = None;
-  reader.for_each_block(|time, handle, value, _| {
-    // The C traversal cannot return an I/O error from this callback. Preserve
-    // the first error and report it after the reader has cleaned up.
-    if output_error.is_none() {
-      output_error = find_value_callback(
-        &value_matcher,
-        &mut var_checker,
-        &printer,
-        &mut output,
-        time,
-        handle,
-        value,
-      )
-      .err();
-    }
-  })?;
-  if let Some(error) = output_error {
-    return Err(error.into());
-  }
-  output.flush()?;
-  Ok(())
-}
-
-/// Callback of FST block iterator.
-/// Runs value matcher, variable checker and printer.
-fn find_value_callback<M, T, C, P, W>(
-  value_matcher: &M,
-  var_checker: &mut C,
-  printer: &P,
-  output: &mut W,
-  time: u64,
-  handle: Handle,
-  value: &[u8],
-) -> io::Result<()>
-where
-  M: ValueMatcher,
-  C: VarChecker<T>,
-  P: Printer,
   W: Write,
 {
-  // Check if value matches.
-  if value_matcher.is_match(value) {
-    // Check the current variable and print.
-    if let Some(name) = var_checker.check(handle) {
-      printer.print(output, time, name, value)?;
-    }
+  let mut scan = Scan {
+    complete: true,
+    callbacks: 0,
+    stop_reason: None,
+    last_callback_time: None,
+    processed_through: None,
+  };
+  if checker.num_vars() == 0 {
+    scan.processed_through = Some(end);
+    return Ok(scan);
   }
-  Ok(())
+  if cli.max_callbacks == Some(0) || cli.max_duration_ms == Some(0) {
+    scan.complete = false;
+    scan.stop_reason = Some(if cli.max_callbacks == Some(0) {
+      "callback_budget_exhausted"
+    } else {
+      "duration_budget_exhausted"
+    });
+    return Ok(scan);
+  }
+  let began = Instant::now();
+  let duration = cli.max_duration_ms.map(Duration::from_millis);
+  let mut output_error = None;
+  let mut passed_end = false;
+  let completed = reader.for_each_block_controlled(|time, handle, value, _| {
+    scan.callbacks += 1;
+    if scan.last_callback_time != Some(time) {
+      scan.processed_through = time.checked_sub(1).filter(|&time| time >= start);
+    }
+    scan.last_callback_time = Some(time);
+    // Callback times are ordered. Crossing end proves the requested search
+    // complete, even when the enclosing compressed block contains later data.
+    if time > end {
+      passed_end = true;
+      return ControlFlow::Break(());
+    }
+    if duration.is_some_and(|duration| began.elapsed() >= duration) {
+      scan.stop_reason = Some("duration_budget_exhausted");
+      return ControlFlow::Break(());
+    }
+    if start <= time
+      && time <= end
+      && matcher.is_match(value)
+      && let Some(name) = checker.check(handle)
+      && let Err(error) = output.matched(time, handle, name, value)
+    {
+      output_error = Some(error);
+      return ControlFlow::Break(());
+    }
+    if cli
+      .max_callbacks
+      .is_some_and(|limit| scan.callbacks >= limit)
+    {
+      scan.stop_reason = Some("callback_budget_exhausted");
+      return ControlFlow::Break(());
+    }
+    ControlFlow::Continue(())
+  });
+  if let Some(error) = output_error {
+    return Err(error);
+  }
+  scan.complete = completed? || passed_end;
+  if scan.complete {
+    scan.processed_through = Some(end);
+  }
+  Ok(scan)
 }
