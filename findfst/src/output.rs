@@ -1,7 +1,7 @@
 //! Record encodings and stdout budgets shared by text and structured searches.
 
 use crate::checker::VarInfo;
-use crate::find::Scan;
+use crate::find::{Scan, ScanStop};
 use crate::printer::{FullPrinter, NamePrinter, Printer};
 use crate::{Cli, Error, Format, Result};
 use fstapi::{Handle, Reader, VarType, var_type};
@@ -89,7 +89,7 @@ impl Catalog {
       if var.is_alias() {
         signals
           .get_mut(&var.handle())
-          .ok_or_else(|| Error::Internal("alias precedes its physical signal"))?
+          .ok_or(Error::Internal("alias precedes its physical signal"))?
           .aliases
           .push(path);
       } else {
@@ -349,7 +349,7 @@ impl<'a, W: Write> Output<'a, W> {
           self.emitted + self.omitted,
           self.emitted,
           self.omitted,
-          scan.stop_reason.unwrap_or("none")
+          scan.stop_reason.map(ScanStop::as_str).unwrap_or("none")
         );
       }
       return Ok(());
@@ -358,9 +358,9 @@ impl<'a, W: Write> Output<'a, W> {
       "type": "summary",
       "status": if scan.complete { "complete" } else { "partial" },
       "execution_complete": scan.complete,
-      "stop_reason": scan.stop_reason,
+      "stop_reason": scan.stop_reason.map(ScanStop::as_str),
       "complete": scan.complete,
-      "reason": scan.stop_reason,
+      "reason": scan.stop_reason.map(ScanStop::as_str),
       "unprocessed_input": !scan.complete,
       "last_callback_time": scan.last_callback_time.map(|time| time.to_string()),
       "processed_through": scan.processed_through.map(|time| time.to_string()),

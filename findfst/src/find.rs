@@ -10,6 +10,21 @@ use std::io::Write;
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
+#[derive(Clone, Copy)]
+pub(crate) enum ScanStop {
+  CallbackBudget,
+  DurationBudget,
+}
+
+impl ScanStop {
+  pub(crate) fn as_str(self) -> &'static str {
+    match self {
+      Self::CallbackBudget => "callback_budget_exhausted",
+      Self::DurationBudget => "duration_budget_exhausted",
+    }
+  }
+}
+
 /// Errors that can occurr when constructing [`MatchInfo`].
 pub enum Error {
   Regex(RegexError),
@@ -63,7 +78,7 @@ impl MatchInfo {
 pub(crate) struct Scan {
   pub complete: bool,
   pub callbacks: u64,
-  pub stop_reason: Option<&'static str>,
+  pub stop_reason: Option<ScanStop>,
   pub last_callback_time: Option<u64>,
   pub processed_through: Option<u64>,
 }
@@ -182,9 +197,9 @@ where
   if cli.max_callbacks == Some(0) || cli.max_duration_ms == Some(0) {
     scan.complete = false;
     scan.stop_reason = Some(if cli.max_callbacks == Some(0) {
-      "callback_budget_exhausted"
+      ScanStop::CallbackBudget
     } else {
-      "duration_budget_exhausted"
+      ScanStop::DurationBudget
     });
     return Ok(scan);
   }
@@ -205,7 +220,7 @@ where
       return ControlFlow::Break(());
     }
     if duration.is_some_and(|duration| began.elapsed() >= duration) {
-      scan.stop_reason = Some("duration_budget_exhausted");
+      scan.stop_reason = Some(ScanStop::DurationBudget);
       return ControlFlow::Break(());
     }
     if start <= time && time <= end {
@@ -226,7 +241,7 @@ where
       .max_callbacks
       .is_some_and(|limit| scan.callbacks >= limit)
     {
-      scan.stop_reason = Some("callback_budget_exhausted");
+      scan.stop_reason = Some(ScanStop::CallbackBudget);
       return ControlFlow::Break(());
     }
     ControlFlow::Continue(())

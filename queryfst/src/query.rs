@@ -6,6 +6,21 @@ use std::io::Write;
 use std::ops::ControlFlow;
 use std::time::Instant;
 
+#[derive(Clone, Copy)]
+enum ScanStop {
+  CallbackBudget,
+  DurationBudget,
+}
+
+impl ScanStop {
+  fn as_str(self) -> &'static str {
+    match self {
+      Self::CallbackBudget => "callback_budget_exhausted",
+      Self::DurationBudget => "duration_budget_exhausted",
+    }
+  }
+}
+
 /// Callback representation; strings are used only at the output boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Encoding {
@@ -135,7 +150,7 @@ impl State {
 
 /// Emits one complete JSON record per line and propagates output failures.
 fn line(output: &mut Output<impl Write>, record: &Value) -> Result<bool> {
-  Ok(output.record(record)?)
+  output.record(record)
 }
 
 /// Selects handles first, then collects canonical paths and every alias.
@@ -244,6 +259,13 @@ fn initial(
   Ok(())
 }
 
+#[derive(Clone, Copy)]
+struct Window {
+  start: u64,
+  end: u64,
+  scan_start: u64,
+}
+
 /// Runs a masked streaming query with explicit boundary and truncation records.
 pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
   let mut reader = Reader::open(&cli.input)?;
@@ -284,6 +306,27 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
   } else {
     start
   };
+  let window = Window {
+    start,
+    end,
+    scan_start,
+  };
+  write_header(&reader, &cli, &signals, window, output)?;
+  scan(&mut reader, &cli, &signals, &activity, window, output)
+}
+
+fn write_header(
+  reader: &Reader,
+  cli: &Cli,
+  signals: &[Signal],
+  window: Window,
+  output: &mut Output<impl Write>,
+) -> Result<()> {
+  let Window {
+    start,
+    end,
+    scan_start,
+  } = window;
   line(
     output,
     &json!({
@@ -305,7 +348,7 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
       "early_termination": true,
     }),
   )?;
-  for signal in &signals {
+  for signal in signals {
     line(
       output,
       &json!({
@@ -319,7 +362,7 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
       }),
     )?;
   }
-  for &(time, active) in &activity {
+  for &(time, active) in &reader.dump_activity() {
     line(
       output,
       &json!({"type": "dump_activity",
@@ -328,8 +371,24 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
     )?;
   }
 
+  Ok(())
+}
+
+fn scan(
+  reader: &mut Reader,
+  cli: &Cli,
+  signals: &[Signal],
+  activity: &[(u64, bool)],
+  window: Window,
+  output: &mut Output<impl Write>,
+) -> Result<()> {
+  let Window {
+    start,
+    end,
+    scan_start,
+  } = window;
   reader.clear_mask_all();
-  for signal in &signals {
+  for signal in signals {
     reader.set_mask(signal.handle);
   }
   reader.set_time_range_limit(scan_start, end);
@@ -354,9 +413,9 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
   let skip = cli.max_callbacks == Some(0) || cli.max_duration_ms == Some(0);
   if skip {
     reason = Some(if cli.max_callbacks == Some(0) {
-      "callback_budget_exhausted"
+      ScanStop::CallbackBudget
     } else {
-      "duration_budget_exhausted"
+      ScanStop::DurationBudget
     });
   }
   if !skip {
@@ -372,13 +431,13 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
         .max_duration_ms
         .is_some_and(|n| started.elapsed().as_millis() >= u128::from(n))
       {
-        reason = Some("duration_budget_exhausted");
+        reason = Some(ScanStop::DurationBudget);
         return ControlFlow::Break(());
       }
       let result = (|| -> Result<()> {
         callbacks += 1;
         if !initialized && time >= start {
-          initial(output, &signals, &mut states, &activity, start)?;
+          initial(output, signals, &mut states, activity, start)?;
           initialized = true;
         }
         if time > end {
@@ -413,7 +472,7 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
         return ControlFlow::Break(());
       }
       if cli.max_callbacks.is_some_and(|n| callbacks >= n) {
-        reason = Some("callback_budget_exhausted");
+        reason = Some(ScanStop::CallbackBudget);
         return ControlFlow::Break(());
       }
       ControlFlow::Continue(())
@@ -427,7 +486,7 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
     return Err(error);
   }
   if !initialized && complete {
-    initial(output, &signals, &mut states, &activity, start)?;
+    initial(output, signals, &mut states, activity, start)?;
   }
   let mut summary_rows = 0u64;
   if cli.summary && complete {
@@ -468,7 +527,7 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
   output.finish(json!({
       "type": "summary",
       "complete": complete,
-      "reason": reason,
+      "reason": reason.map(ScanStop::as_str),
       "output_reason": truncated.then_some("row_budget_exhausted"),
       "status": if complete { "complete" } else { "partial" },
       "processed_through": processed_through.map(|t| t.to_string()),
