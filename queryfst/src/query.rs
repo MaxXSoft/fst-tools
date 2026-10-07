@@ -6,6 +6,26 @@ use std::io::Write;
 use std::ops::ControlFlow;
 use std::time::Instant;
 
+/// Callback representation; strings are used only at the output boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Encoding {
+  Bits,
+  BytesHex,
+  RealF64LeHex,
+  Evcd,
+}
+
+impl Encoding {
+  fn as_str(self) -> &'static str {
+    match self {
+      Self::Bits => "bits",
+      Self::BytesHex => "bytes_hex",
+      Self::RealF64LeHex => "real_f64_le_hex",
+      Self::Evcd => "evcd",
+    }
+  }
+}
+
 /// One physical facility and its hierarchy names, in handle order.
 struct Signal {
   handle: Handle,
@@ -22,28 +42,28 @@ impl Signal {
   }
 
   /// Selects a lossless JSON representation without narrowing bit vectors.
-  fn encoding(&self) -> &'static str {
+  fn encoding(&self) -> Encoding {
     match self.ty {
-      _ if self.variable() => "bytes_hex",
+      _ if self.variable() => Encoding::BytesHex,
       var_type::VCD_REAL
       | var_type::VCD_REAL_PARAMETER
       | var_type::VCD_REALTIME
-      | var_type::SV_SHORTREAL => "real_f64_le_hex",
-      var_type::VCD_PORT => "evcd",
-      _ => "bits",
+      | var_type::SV_SHORTREAL => Encoding::RealF64LeHex,
+      var_type::VCD_PORT => Encoding::Evcd,
+      _ => Encoding::Bits,
     }
   }
 
   /// Encodes variable bytes in hex and textual callbacks without lossy UTF-8.
   fn value(&self, bytes: &[u8]) -> Result<String> {
     let real_bytes;
-    let bytes = if self.encoding() == "real_f64_le_hex" {
+    let bytes = if self.encoding() == Encoding::RealF64LeHex {
       real_bytes = u64::from_ne_bytes(bytes.try_into()?).to_le_bytes();
       &real_bytes
     } else {
       bytes
     };
-    if self.variable() || self.encoding() == "real_f64_le_hex" {
+    if self.variable() || self.encoding() == Encoding::RealF64LeHex {
       const HEX: &[u8] = b"0123456789abcdef";
       let mut result = String::with_capacity(bytes.len() * 2);
       for &byte in bytes {
@@ -68,7 +88,7 @@ impl Signal {
       "type": kind,
       "time": time.to_string(),
       "handle": u32::from(self.handle),
-      "encoding": self.encoding(),
+      "encoding": self.encoding().as_str(),
       "value": value.map(|value| self.value(value)).transpose()?,
       "source_time": source_time.map(|time| time.to_string()),
     }))
@@ -239,7 +259,7 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
   let signals = select(&mut reader, &cli)?;
   if cli.summary
     && signals.iter().any(|signal| {
-      signal.width != 1 || signal.encoding() != "bits" || signal.ty == var_type::VCD_EVENT
+      signal.width != 1 || signal.encoding() != Encoding::Bits || signal.ty == var_type::VCD_EVENT
     })
   {
     return Err(Error::Arguments(
@@ -295,7 +315,7 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
         "aliases": signal.aliases,
         "width": signal.width,
         "var_type": signal.ty,
-        "encoding": signal.encoding(),
+        "encoding": signal.encoding().as_str(),
       }),
     )?;
   }

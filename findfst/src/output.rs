@@ -6,11 +6,32 @@ use crate::printer::{FullPrinter, NamePrinter, Printer};
 use crate::{Cli, Error, Format, Result};
 use fstapi::{Handle, Reader, VarType, var_type};
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
 
 pub(crate) const MIN_BYTES: u64 = 4096;
 const FOOTER_RESERVE: u64 = 2048;
+
+/// Callback representation; strings are used only at the output boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Encoding {
+  Bits,
+  BytesHex,
+  RealF64LeHex,
+  Evcd,
+}
+
+impl Encoding {
+  fn as_str(self) -> &'static str {
+    match self {
+      Self::Bits => "bits",
+      Self::BytesHex => "bytes_hex",
+      Self::RealF64LeHex => "real_f64_le_hex",
+      Self::Evcd => "evcd",
+    }
+  }
+}
 
 /// Metadata for a selected physical signal, retaining the legacy display name.
 struct Signal {
@@ -22,33 +43,49 @@ struct Signal {
 }
 
 impl Signal {
-  /// Legacy matching sees decimal real callbacks, never native double bytes.
-  fn encoding(&self) -> &'static str {
+  /// Preserve native real bits in structured output, including NaN payloads.
+  fn encoding(&self) -> Encoding {
     match self.ty {
-      var_type::GEN_STRING => "bytes_hex",
+      var_type::GEN_STRING => Encoding::BytesHex,
       var_type::VCD_REAL
       | var_type::VCD_REAL_PARAMETER
       | var_type::VCD_REALTIME
-      | var_type::SV_SHORTREAL => "real_decimal",
-      _ if self.width == 0 => "bytes_hex",
-      var_type::VCD_PORT => "evcd",
-      _ => "bits",
+      | var_type::SV_SHORTREAL => Encoding::RealF64LeHex,
+      _ if self.width == 0 => Encoding::BytesHex,
+      var_type::VCD_PORT => Encoding::Evcd,
+      _ => Encoding::Bits,
     }
   }
 }
 
-/// Deterministic physical-handle metadata, built only for JSON output.
+/// Selected real handles for matching, plus optional structured metadata.
 #[derive(Default)]
-pub(crate) struct Catalog(BTreeMap<Handle, Signal>);
+pub(crate) struct Catalog {
+  signals: BTreeMap<Handle, Signal>,
+  real_handles: HashSet<Handle>,
+}
 
 impl Catalog {
-  pub(crate) fn new(reader: &mut Reader, vars: &VarInfo) -> Result<Self> {
+  pub(crate) fn new(reader: &mut Reader, vars: &VarInfo, metadata: bool) -> Result<Self> {
     let mut signals = BTreeMap::<Handle, Signal>::new();
+    let mut real_handles = HashSet::new();
     for entry in reader.vars() {
       let (path, var) = entry?;
       let Some(name) = vars.name(var.handle()) else {
         continue;
       };
+      if matches!(
+        var.ty(),
+        var_type::VCD_REAL
+          | var_type::VCD_REAL_PARAMETER
+          | var_type::VCD_REALTIME
+          | var_type::SV_SHORTREAL
+      ) {
+        real_handles.insert(var.handle());
+      }
+      if !metadata {
+        continue;
+      }
       if var.is_alias() {
         signals
           .get_mut(&var.handle())
@@ -68,8 +105,30 @@ impl Catalog {
         );
       }
     }
-    Ok(Self(signals))
+    Ok(Self {
+      signals,
+      real_handles,
+    })
   }
+}
+
+/// Decimal matching remains readable, but uses a round-trip representation.
+/// NaNs include their exact bits so payloads and signs remain distinguishable.
+fn real_text(value: &[u8]) -> Result<String> {
+  let bits = real_bits(value)?;
+  let value = f64::from_bits(bits);
+  Ok(if value.is_nan() {
+    format!("NaN(0x{bits:016x})")
+  } else {
+    value.to_string()
+  })
+}
+
+fn real_bits(value: &[u8]) -> Result<u64> {
+  let bytes = value
+    .try_into()
+    .map_err(|_| Error::Internal("real callback must contain eight bytes"))?;
+  Ok(u64::from_ne_bytes(bytes))
 }
 
 /// Serialize one entire line before deciding whether it fits the byte budget.
@@ -142,7 +201,8 @@ impl<'a, W: Write> Output<'a, W> {
       "value_regex": cli.regex,
       "hex": cli.hex,
       "event_order": "libfst_callback_order",
-      "real_values": "libfst_default_decimal",
+      "real_values": "real_f64_le_hex",
+      "real_matching": "round_trip_decimal_nan_bits",
       "limits": {
         "max_rows": cli.max_rows.map(|n| n.to_string()),
         "max_bytes": cli.max_bytes.map(|n| n.to_string()),
@@ -156,7 +216,7 @@ impl<'a, W: Write> Output<'a, W> {
       ));
     }
     output.write(&header)?;
-    for (&handle, signal) in &catalog.0 {
+    for (&handle, signal) in &catalog.signals {
       output.metadata(&json!({
         "type": "signal",
         "handle": u32::from(handle),
@@ -165,7 +225,7 @@ impl<'a, W: Write> Output<'a, W> {
         "aliases": signal.aliases,
         "width": signal.width,
         "var_type": signal.ty,
-        "encoding": signal.encoding(),
+        "encoding": signal.encoding().as_str(),
       }))?;
     }
     for (time, active) in reader.dump_activity() {
@@ -205,6 +265,19 @@ impl<'a, W: Write> Output<'a, W> {
     }
   }
 
+  /// Convert only real callbacks for matching; all other callbacks stay borrowed.
+  pub(crate) fn matching_value<'v>(
+    &self,
+    handle: Handle,
+    value: &'v [u8],
+  ) -> Result<Cow<'v, [u8]>> {
+    if !self.catalog.real_handles.is_empty() && self.catalog.real_handles.contains(&handle) {
+      Ok(Cow::Owned(real_text(value)?.into_bytes()))
+    } else {
+      Ok(Cow::Borrowed(value))
+    }
+  }
+
   /// Count every eligible match even after the emitted prefix hits a limit.
   pub(crate) fn matched(
     &mut self,
@@ -219,12 +292,16 @@ impl<'a, W: Write> Output<'a, W> {
       return Ok(());
     }
     let bytes = if self.cli.output_format() == Format::Json {
-      let signal = &self.catalog.0[&handle];
+      let signal = &self.catalog.signals[&handle];
       let (encoding, value) = match signal.encoding() {
-        "bytes_hex" => ("bytes_hex", hex(value)),
+        Encoding::BytesHex => (Encoding::BytesHex, hex(value)),
+        Encoding::RealF64LeHex => (
+          Encoding::RealF64LeHex,
+          hex(&real_bits(value)?.to_le_bytes()),
+        ),
         encoding => match std::str::from_utf8(value) {
           Ok(value) => (encoding, value.to_owned()),
-          Err(_) => ("bytes_hex", hex(value)),
+          Err(_) => (Encoding::BytesHex, hex(value)),
         },
       };
       json_line(&json!({
@@ -235,7 +312,7 @@ impl<'a, W: Write> Output<'a, W> {
         "name": name,
         "width": signal.width,
         "var_type": signal.ty,
-        "encoding": encoding,
+        "encoding": encoding.as_str(),
         "value": value,
       }))?
     } else {
@@ -243,7 +320,7 @@ impl<'a, W: Write> Output<'a, W> {
       if self.cli.names_only {
         NamePrinter.print(&mut bytes, time, name, value)?;
       } else {
-        FullPrinter.print(&mut bytes, time, name, value)?;
+        FullPrinter.print(&mut bytes, time, name, &self.matching_value(handle, value)?)?;
       }
       bytes
     };

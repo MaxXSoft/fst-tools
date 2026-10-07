@@ -208,14 +208,19 @@ where
       scan.stop_reason = Some("duration_budget_exhausted");
       return ControlFlow::Break(());
     }
-    if start <= time
-      && time <= end
-      && matcher.is_match(value)
-      && let Some(name) = checker.check(handle)
-      && let Err(error) = output.matched(time, handle, name, value)
-    {
-      output_error = Some(error);
-      return ControlFlow::Break(());
+    if start <= time && time <= end {
+      let result = (|| -> Result<()> {
+        if matcher.is_match(&output.matching_value(handle, value)?)
+          && let Some(name) = checker.check(handle)
+        {
+          output.matched(time, handle, name, value)?;
+        }
+        Ok(())
+      })();
+      if let Err(error) = result {
+        output_error = Some(error);
+        return ControlFlow::Break(());
+      }
     }
     if cli
       .max_callbacks
