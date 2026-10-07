@@ -14,12 +14,12 @@ findfst trace.fst '.*' --regex --all-matches --json \
   --max-callbacks 100000 --max-duration-ms 500
 ```
 
-`--format text` is explicit text mode (`human` is an alias). `--format json`
+`--format text` is explicit text mode. `--format json`
 produces **JSON Lines**, one complete object per line; `jsonl` is an alias and
 `--json` is a convenience spelling. `--json` and `--format` cannot be combined.
 `--names-only` is supported only in text mode.
 
-`--signals` is an unanchored, case-sensitive Rust regular expression against
+`-S` / `--signals` is an unanchored, case-sensitive Rust regular expression against
 full names, including any declaration range suffix such as `pc [31:0]`. With a
 signal filter, the displayed name is the canonical name if that name matches,
 otherwise the first matching alias in hierarchy order. A selection matching no

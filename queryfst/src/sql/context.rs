@@ -1,5 +1,6 @@
 //! Coalesce sample windows around all, the first, or the last WHERE match.
 use super::{Cell, MatchMode};
+use crate::error::Result;
 use std::collections::VecDeque;
 
 pub(super) struct Context {
@@ -15,7 +16,7 @@ pub(super) struct Context {
 }
 
 impl Context {
-  pub fn new(before: u64, after: u64, capacity: usize, mode: MatchMode) -> Result<Self, String> {
+  pub fn new(before: u64, after: u64, capacity: usize, mode: MatchMode) -> Result<Self> {
     let before =
       usize::try_from(before).map_err(|_| "context before count exceeds address space")?;
     // Last mode retains both the rolling history and the candidate window.
