@@ -276,8 +276,9 @@ pub(super) fn execute(
   mut emit: impl FnMut(&[Column], &[Cell]) -> Result<bool>,
 ) -> Result<Report> {
   let recording = validate(reader, options)?;
-  let signals = bindings::resolve(reader, &options.bindings)?;
-  let plan = Plan::compile(&options.sql, &signals.schema, options)?;
+  let query = Plan::parse(&options.sql)?;
+  let signals = bindings::resolve(reader, &options.bindings, &query)?;
+  let plan = Plan::compile(&query, &signals.schema, options)?;
   reader.clear_mask_all();
   for &handle in signals.mapping.keys() {
     reader.set_mask(handle);
