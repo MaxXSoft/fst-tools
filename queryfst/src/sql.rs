@@ -1,13 +1,13 @@
 //! Finite SQL queries over explicitly sampled waveform state.
-use crate::error::{Error, Result};
+mod bindings;
 mod context;
 mod deadline;
+mod executor;
 mod plan;
 
+use crate::error::Result;
 use fstapi::Reader;
-use std::collections::{BTreeMap, HashMap};
-use std::ops::ControlFlow;
-use std::time::Instant;
+use std::collections::BTreeMap;
 
 /// A lossless scalar value used by SQL expressions and output rows.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -40,22 +40,8 @@ impl Cell {
       ))
     } else if bytes.iter().all(|c| {
       matches!(
-        c,
-        b'0'
-          | b'1'
-          | b'x'
-          | b'X'
-          | b'z'
-          | b'Z'
-          | b'h'
-          | b'H'
-          | b'l'
-          | b'L'
-          | b'u'
-          | b'U'
-          | b'w'
-          | b'W'
-          | b'-'
+        c.to_ascii_lowercase(),
+        b'0' | b'1' | b'x' | b'z' | b'h' | b'l' | b'u' | b'w' | b'-'
       )
     }) {
       Ok(Self::Bits(std::str::from_utf8(bytes)?.into()))
@@ -105,8 +91,9 @@ pub struct Column {
 
 /// Sampling domain; phase is an absolute raw tick residue modulo period.
 #[derive(Clone, Debug)]
-pub enum Sampling {
-  Period { period: u64, phase: u64 },
+pub struct PeriodicSampling {
+  pub period: u64,
+  pub phase: u64,
 }
 
 /// Chooses matching sample windows independently of SQL output row limits.
@@ -124,7 +111,7 @@ pub struct Options {
   pub bindings: BTreeMap<String, String>,
   pub start: u64,
   pub end: u64,
-  pub sampling: Sampling,
+  pub sampling: PeriodicSampling,
   pub max_callbacks: Option<u64>,
   pub max_samples: Option<u64>,
   pub max_groups: Option<usize>,
@@ -133,6 +120,36 @@ pub struct Options {
   pub context_before: u64,
   pub context_after: u64,
   pub matches: MatchMode,
+}
+
+/// A cooperative stop may complete a finite query without scanning the whole trace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StopReason {
+  SqlLimit,
+  FirstMatch,
+  CallbackBudget,
+  DurationBudget,
+  SampleBudget,
+  GroupBudget,
+  BufferBudget,
+  PendingRequestBudget,
+  OutputLimit,
+}
+
+impl StopReason {
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::SqlLimit => "sql_limit",
+      Self::FirstMatch => "first_match",
+      Self::CallbackBudget => "callback_budget",
+      Self::DurationBudget => "duration_budget",
+      Self::SampleBudget => "sample_budget",
+      Self::GroupBudget => "group_budget",
+      Self::BufferBudget => "buffer_budget",
+      Self::PendingRequestBudget => "pending_request_budget",
+      Self::OutputLimit => "output_limit",
+    }
+  }
 }
 
 /// Work/output status; partial aggregation describes only the observed prefix.
@@ -151,7 +168,7 @@ pub struct Report {
   pub emitted_rows: u64,
   pub complete: bool,
   pub output_truncated: bool,
-  pub stop_reason: Option<String>,
+  pub stop_reason: Option<StopReason>,
   pub processed_through: Option<u64>,
 }
 
@@ -164,284 +181,7 @@ pub struct Report {
 pub fn execute(
   reader: &mut Reader,
   options: &Options,
-  mut emit: impl FnMut(&[Column], &[Cell]) -> Result<bool>,
+  emit: impl FnMut(&[Column], &[Cell]) -> Result<bool>,
 ) -> Result<Report> {
-  if options.start > options.end
-    || options.start < reader.start_time()
-    || options.end > reader.end_time()
-  {
-    return Err(Error::Arguments(
-      "SQL range must be contained in the waveform and satisfy start <= end".into(),
-    ));
-  }
-  let Sampling::Period { period, phase } = options.sampling;
-  if period == 0 || phase >= period {
-    return Err(Error::Arguments(
-      "sampling requires period > 0 and phase < period".into(),
-    ));
-  }
-  let activity = reader.dump_activity();
-  let mut active = true;
-  for &(time, next) in &activity {
-    if time <= options.start {
-      active = next;
-    }
-    if !next && options.start <= time && time <= options.end {
-      return Err("SQL sampling range contains a waveform recording interruption".into());
-    }
-  }
-  if !active {
-    return Err("SQL sampling starts while waveform recording is disabled".into());
-  }
-  let names: Vec<_> = options.bindings.keys().cloned().collect();
-  if names
-    .iter()
-    .any(|n| matches!(n.as_str(), "tick" | "sample_index"))
-  {
-    return Err("binding names tick and sample_index are reserved".into());
-  }
-  let mut paths: HashMap<&str, Vec<usize>> = HashMap::new();
-  for (i, name) in names.iter().enumerate() {
-    paths
-      .entry(options.bindings[name].as_str())
-      .or_default()
-      .push(i);
-  }
-  let mut mapping = HashMap::new();
-  let mut widths = vec![0; names.len()];
-  let mut found = vec![false; names.len()];
-  let mut handles = Vec::new();
-  for entry in reader.vars() {
-    let (path, var) = entry?;
-    if let Some(indices) = paths.get(path.as_str()) {
-      if var.length() == 0
-        || matches!(
-          var.ty(),
-          fstapi::var_type::GEN_STRING
-            | fstapi::var_type::VCD_REAL
-            | fstapi::var_type::VCD_REAL_PARAMETER
-            | fstapi::var_type::VCD_REALTIME
-            | fstapi::var_type::SV_SHORTREAL
-            | fstapi::var_type::VCD_PORT
-        )
-      {
-        return Err(format!("binding {path} is not fixed-width logic").into());
-      }
-      for &i in indices {
-        widths[i] = var.length();
-        found[i] = true;
-      }
-      mapping
-        .entry(var.handle())
-        .or_insert_with(Vec::new)
-        .extend(indices.iter().copied());
-      handles.push(var.handle());
-    }
-  }
-  if found.iter().any(|v| !v) {
-    return Err(
-      format!(
-        "missing bound signals: {}",
-        names
-          .iter()
-          .enumerate()
-          .filter(|(i, _)| !found[*i])
-          .map(|(_, n)| n.as_str())
-          .collect::<Vec<_>>()
-          .join(", ")
-      )
-      .into(),
-    );
-  }
-  let schema: HashMap<_, _> = names
-    .iter()
-    .enumerate()
-    .map(|(i, name)| (name.clone(), (i, widths[i])))
-    .chain([
-      ("tick".into(), (names.len(), 64)),
-      ("sample_index".into(), (names.len() + 1, 64)),
-    ])
-    .collect();
-  let mut plan = plan::Plan::compile(&options.sql, &schema, options)?;
-  reader.clear_mask_all();
-  for handle in handles {
-    reader.set_mask(handle);
-  }
-  let prior_off: Vec<_> = activity
-    .iter()
-    .filter(|(t, enabled)| !enabled && *t < options.start)
-    .map(|(t, _)| *t)
-    .collect();
-  reader.set_time_range_limit(
-    if prior_off.is_empty() {
-      options.start
-    } else {
-      reader.start_time()
-    },
-    options.end,
-  );
-  let mut values = vec![Cell::Null; names.len() + 2];
-  let mut observed = vec![None; names.len()];
-  let residue = options.start % period;
-  let offset = if phase >= residue {
-    phase - residue
-  } else {
-    period - (residue - phase)
-  };
-  let mut next_sample = options
-    .start
-    .checked_add(offset)
-    .filter(|t| *t <= options.end);
-  let mut report = Report {
-    columns: plan.columns.clone(),
-    ..Report::default()
-  };
-  if plan.empty_limit() {
-    report.complete = true;
-    report.stop_reason = Some("sql_limit".into());
-    return Ok(report);
-  }
-  if options.max_callbacks == Some(0)
-    || options.max_duration_ms == Some(0)
-    || options.max_samples == Some(0)
-    || plan.zero_group_budget()
-  {
-    report.stop_reason = Some(
-      if options.max_callbacks == Some(0) {
-        "callback_budget"
-      } else if options.max_duration_ms == Some(0) {
-        "duration_budget"
-      } else if options.max_samples == Some(0) {
-        "sample_budget"
-      } else {
-        "group_budget"
-      }
-      .into(),
-    );
-    plan.finish(&mut report, &mut emit)?;
-    return Ok(report);
-  }
-  let mut callback_error = None;
-  let timer = Instant::now();
-  let mut initialized = false;
-  let mut emit_samples = |until: u64,
-                          inclusive: bool,
-                          values: &mut [Cell],
-                          observed: &[Option<u64>],
-                          report: &mut Report|
-   -> Result<bool> {
-    if !initialized {
-      for (i, time) in observed.iter().enumerate() {
-        if time.is_some_and(|time| {
-          prior_off.iter().any(|off| *off >= time)
-            || !activity
-              .iter()
-              .take_while(|(at, _)| *at <= time)
-              .last()
-              .map(|(_, active)| *active)
-              .unwrap_or(true)
-        }) {
-          values[i] = Cell::Null;
-        }
-      }
-      initialized = true;
-    }
-    while let Some(tick) = next_sample.filter(|t| *t < until || inclusive && *t == until) {
-      if options
-        .max_samples
-        .is_some_and(|limit| report.sampled_rows >= limit)
-      {
-        report.stop_reason = Some("sample_budget".into());
-        return Ok(false);
-      }
-      if options
-        .max_duration_ms
-        .is_some_and(|limit| timer.elapsed().as_millis() >= u128::from(limit))
-      {
-        report.stop_reason = Some("duration_budget".into());
-        return Ok(false);
-      }
-      values[names.len()] = Cell::Integer(i128::from(tick));
-      values[names.len() + 1] = Cell::Integer(i128::from(report.sampled_rows));
-      report.sampled_rows += 1;
-      report.processed_through = Some(tick);
-      next_sample = tick.checked_add(period).filter(|t| *t <= options.end);
-      if !plan.sample(values, report, &mut emit)? {
-        return Ok(false);
-      }
-    }
-    Ok(true)
-  };
-  if mapping.is_empty() {
-    if emit_samples(options.end, true, &mut values, &observed, &mut report)? {
-      report.complete = true;
-      report.scan_complete = true;
-    }
-    plan.finish(&mut report, &mut emit)?;
-    return Ok(report);
-  }
-  let mut last_time = None;
-  let traversed = reader.for_each_block_controlled(|time, handle, bytes, _| {
-    if callback_error.is_some() {
-      return ControlFlow::Break(());
-    }
-    let result = (|| -> Result<bool> {
-      if last_time.is_some_and(|last| time < last) {
-        return Err("nonmonotonic callback timestamps".into());
-      }
-      if last_time != Some(time) {
-        if time >= options.start && !emit_samples(time, false, &mut values, &observed, &mut report)?
-        {
-          return Ok(false);
-        }
-        last_time = Some(time);
-      }
-      // An enclosing block can deliver callbacks beyond the requested end.
-      // Every requested sample is now based on a complete preceding group.
-      if time > options.end {
-        return Ok(false);
-      }
-      report.decoded_callbacks += 1;
-      if options
-        .max_duration_ms
-        .is_some_and(|limit| timer.elapsed().as_millis() >= u128::from(limit))
-      {
-        report.stop_reason = Some("duration_budget".into());
-        return Ok(false);
-      }
-      let value = Cell::logic(bytes)?;
-      for &index in &mapping[&handle] {
-        values[index] = value.clone();
-        observed[index] = Some(time);
-      }
-      if options
-        .max_callbacks
-        .is_some_and(|limit| report.decoded_callbacks >= limit)
-      {
-        report.stop_reason = Some("callback_budget".into());
-        return Ok(false);
-      }
-      Ok(true)
-    })();
-    match result {
-      Ok(true) => ControlFlow::Continue(()),
-      Ok(false) => ControlFlow::Break(()),
-      Err(error) => {
-        callback_error = Some(error);
-        ControlFlow::Break(())
-      }
-    }
-  })?;
-  if let Some(error) = callback_error {
-    return Err(error);
-  }
-  if report.stop_reason.is_none()
-    && (traversed || last_time.is_some_and(|t| t > options.end))
-    && emit_samples(options.end, true, &mut values, &observed, &mut report)?
-  {
-    report.complete = true;
-    report.scan_complete = true;
-  }
-  plan.finish(&mut report, &mut emit)?;
-  Ok(report)
+  executor::execute(reader, options, emit)
 }

@@ -1,4 +1,5 @@
 //! Typed finite SQL planning, temporal expressions, and streaming reductions.
+use super::StopReason;
 use super::context::Context as MatchContext;
 use super::deadline::Deadline;
 use super::{Cell, Column, MatchMode, Options, Report};
@@ -1094,7 +1095,7 @@ impl Plan {
       self.temporal_values[i] = match self.temporal[i].advance(args) {
         Ok(value) => value,
         Err(Error::PendingRequestBudget) => {
-          report.stop_reason = Some("pending_request_budget".into());
+          report.stop_reason = Some(StopReason::PendingRequestBudget);
           return Ok(false);
         }
         Err(error) => return Err(error),
@@ -1128,7 +1129,7 @@ impl Plan {
         }
         if !emit(&self.columns, &row)? {
           report.output_truncated = true;
-          report.stop_reason = Some("output_limit".into());
+          report.stop_reason = Some(StopReason::OutputLimit);
           return Ok(false);
         }
         self.output_rows += 1;
@@ -1136,7 +1137,7 @@ impl Plan {
       }
       if context.done() {
         report.complete = true;
-        report.stop_reason = Some("first_match".into());
+        report.stop_reason = Some(StopReason::FirstMatch);
         return Ok(false);
       }
       return Ok(true);
@@ -1156,7 +1157,7 @@ impl Plan {
             .max_groups
             .is_some_and(|limit| self.groups.len() >= limit)
           {
-            report.stop_reason = Some("group_budget".into());
+            report.stop_reason = Some(StopReason::GroupBudget);
             return Ok(false);
           }
           let index = self.groups.len();
@@ -1185,14 +1186,14 @@ impl Plan {
         if self.limit.is_none_or(|limit| self.output_rows < limit) {
           if !emit(&self.columns, &values)? {
             report.output_truncated = true;
-            report.stop_reason = Some("output_limit".into());
+            report.stop_reason = Some(StopReason::OutputLimit);
             return Ok(false);
           }
           self.output_rows += 1;
           report.emitted_rows += 1;
           if self.limit == Some(self.output_rows) {
             report.complete = true;
-            report.stop_reason = Some("sql_limit".into());
+            report.stop_reason = Some(StopReason::SqlLimit);
             return Ok(false);
           }
         }
@@ -1202,7 +1203,7 @@ impl Plan {
             .max_buffer_rows
             .is_some_and(|limit| self.rows.len() >= limit)
         {
-          report.stop_reason = Some("buffer_budget".into());
+          report.stop_reason = Some(StopReason::BufferBudget);
           return Ok(false);
         }
         let order = self
@@ -1237,7 +1238,7 @@ impl Plan {
   ) -> Result<()> {
     if self.aggregate && self.group_by.is_empty() && self.max_groups == Some(0) {
       report.complete = false;
-      report.stop_reason = Some("group_budget".into());
+      report.stop_reason = Some(StopReason::GroupBudget);
     }
     for temporal in &self.temporal {
       if let Some(deadline) = &temporal.deadline {
@@ -1253,7 +1254,7 @@ impl Plan {
         if !emit(&self.columns, &row)? {
           report.output_truncated = true;
           if report.stop_reason.is_none() {
-            report.stop_reason = Some("output_limit".into());
+            report.stop_reason = Some(StopReason::OutputLimit);
           }
           break;
         }
@@ -1288,7 +1289,7 @@ impl Plan {
             if !emit(&self.columns, &values)? {
               report.output_truncated = true;
               if report.stop_reason.is_none() {
-                report.stop_reason = Some("output_limit".into());
+                report.stop_reason = Some(StopReason::OutputLimit);
               }
               break;
             }
@@ -1300,7 +1301,7 @@ impl Plan {
             .max_buffer_rows
             .is_some_and(|limit| self.rows.len() >= limit)
           {
-            report.stop_reason = Some("buffer_budget".into());
+            report.stop_reason = Some(StopReason::BufferBudget);
             report.complete = false;
             report.output_truncated = true;
             break;
@@ -1351,7 +1352,7 @@ impl Plan {
       if !emit(&self.columns, &row.values)? {
         report.output_truncated = true;
         if report.stop_reason.is_none() {
-          report.stop_reason = Some("output_limit".into());
+          report.stop_reason = Some(StopReason::OutputLimit);
         }
         break;
       }
