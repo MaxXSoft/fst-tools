@@ -803,18 +803,22 @@ fn has_aggregate(expr: &A) -> bool {
 }
 
 impl Plan {
-  pub(super) fn compile(
-    sql: &str,
-    schema: &HashMap<String, (usize, u32)>,
-    options: &Options,
-  ) -> Result<Self> {
+  pub(super) fn parse(sql: &str) -> Result<Box<ast::Query>> {
     let mut statements = Parser::parse_sql(&GenericDialect {}, sql)?;
     if statements.len() != 1 {
       return Err("exactly one SELECT statement is required".into());
     }
-    let Statement::Query(query) = statements.remove(0) else {
-      return Err("only SELECT queries are supported".into());
-    };
+    match statements.remove(0) {
+      Statement::Query(query) => Ok(query),
+      _ => Err("only SELECT queries are supported".into()),
+    }
+  }
+
+  pub(super) fn compile(
+    query: &ast::Query,
+    schema: &HashMap<String, (usize, u32)>,
+    options: &Options,
+  ) -> Result<Self> {
     if query.with.is_some()
       || query.offset.is_some()
       || query.fetch.is_some()

@@ -78,6 +78,7 @@ fn header(reader: &Reader, options: &sql::Options) -> serde_json::Value {
     "numeric_encoding": "decimal_string",
     "unknown_numeric": "null",
     "bindings": options.bindings,
+    "sql": options.sql,
   })
 }
 
