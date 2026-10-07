@@ -56,6 +56,7 @@ impl Error {
       Self::Arguments(_) => "invalid_arguments",
     }
   }
+
   fn exit_code(&self) -> i32 {
     if matches!(self, Self::Arguments(_)) {
       2

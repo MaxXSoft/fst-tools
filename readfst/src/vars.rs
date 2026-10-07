@@ -22,9 +22,8 @@ pub struct VarInfo {
   direction: &'static str,
   #[tabled(rename = "Name")]
   name: String,
-  #[tabled(rename = "Length in Bits")]
-  #[serde(rename = "width")]
-  length: u32,
+  #[tabled(rename = "Width in Bits")]
+  width: u32,
   #[tabled(rename = "Alias Of")]
   #[serde(skip)]
   alias_of: String,
@@ -77,7 +76,7 @@ impl VarInfo {
         _ => unreachable!(),
       },
       name: name.into(),
-      length: var.length(),
+      width: var.length(),
       alias_of: alias_of.into(),
     }
   }

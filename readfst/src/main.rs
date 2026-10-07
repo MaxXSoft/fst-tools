@@ -136,7 +136,7 @@ fn try_main() -> Result<(), Error> {
       )
       .exit();
   }
-  if cli.format == Format::Json && cli.names_only {
+  if cli.format != Format::Table && cli.names_only {
     Cli::command()
       .error(
         ErrorKind::ArgumentConflict,
