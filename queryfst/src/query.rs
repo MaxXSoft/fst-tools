@@ -126,7 +126,7 @@ fn select(reader: &mut Reader, cli: &Cli) -> Result<Vec<Signal>> {
   let exact = missing.clone();
   let mut handles = HashSet::new();
   for entry in reader.vars() {
-    let (path, var) = entry.map_err(|error| error.to_string())?;
+    let (path, var) = entry?;
     if exact.contains(path.as_str()) || regex.as_ref().is_some_and(|re| re.is_match(&path)) {
       handles.insert(var.handle());
       missing.remove(path.as_str());
@@ -142,7 +142,7 @@ fn select(reader: &mut Reader, cli: &Cli) -> Result<Vec<Signal>> {
   }
   let mut signals: BTreeMap<Handle, Signal> = BTreeMap::new();
   for entry in reader.vars() {
-    let (path, var) = entry.map_err(|error| error.to_string())?;
+    let (path, var) = entry?;
     if !handles.contains(&var.handle()) {
       continue;
     }
@@ -227,7 +227,7 @@ fn initial(
 
 /// Runs a masked streaming query with explicit boundary and truncation records.
 pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
-  let mut reader = Reader::open(&cli.input).map_err(|error| error.to_string())?;
+  let mut reader = Reader::open(&cli.input)?;
   let start = cli.start.unwrap_or(reader.start_time());
   let end = cli.end.unwrap_or(reader.end_time());
   if start > end || start < reader.start_time() || end > reader.end_time() {
@@ -328,66 +328,64 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
     });
   }
   if !skip {
-    reader
-      .for_each_block_controlled(|time, handle, value, _| {
-        if last_callback_time != Some(time) {
-          processed_through = time.checked_sub(1).filter(|t| *t >= start);
+    reader.for_each_block_controlled(|time, handle, value, _| {
+      if last_callback_time != Some(time) {
+        processed_through = time.checked_sub(1).filter(|t| *t >= start);
+      }
+      last_callback_time = Some(time);
+      if time > end {
+        return ControlFlow::Break(());
+      }
+      if cli
+        .max_duration_ms
+        .is_some_and(|n| started.elapsed().as_millis() >= u128::from(n))
+      {
+        reason = Some("duration_budget_exhausted");
+        return ControlFlow::Break(());
+      }
+      let result = (|| -> Result<()> {
+        callbacks += 1;
+        if !initialized && time >= start {
+          initial(output, &signals, &mut states, &activity, start)?;
+          initialized = true;
         }
-        last_callback_time = Some(time);
         if time > end {
-          return ControlFlow::Break(());
+          return Ok(());
         }
-        if cli
-          .max_duration_ms
-          .is_some_and(|n| started.elapsed().as_millis() >= u128::from(n))
-        {
-          reason = Some("duration_budget_exhausted");
-          return ControlFlow::Break(());
+        let index = indices[&handle];
+        let state = &mut states[index];
+        if time < start {
+          state.previous = Some(value.to_vec());
+          state.source_time = Some(time);
+          return Ok(());
         }
-        let result = (|| -> Result<()> {
-          callbacks += 1;
-          if !initialized && time >= start {
-            initial(output, &signals, &mut states, &activity, start)?;
-            initialized = true;
+        matched += 1;
+        if cli.summary {
+          state.account(time);
+          if state.previous.as_deref().is_some_and(|old| old != value) {
+            state.transitions += 1;
           }
-          if time > end {
-            return Ok(());
+          state.previous = Some(value.to_vec());
+          state.callbacks += 1;
+        } else if emitted < cli.limit && !output.truncated {
+          let mut record = signals[index].record("event", time, Some(value), None)?;
+          record["sequence"] = emitted.to_string().into();
+          if line(output, &record)? {
+            emitted += 1;
           }
-          let index = indices[&handle];
-          let state = &mut states[index];
-          if time < start {
-            state.previous = Some(value.to_vec());
-            state.source_time = Some(time);
-            return Ok(());
-          }
-          matched += 1;
-          if cli.summary {
-            state.account(time);
-            if state.previous.as_deref().is_some_and(|old| old != value) {
-              state.transitions += 1;
-            }
-            state.previous = Some(value.to_vec());
-            state.callbacks += 1;
-          } else if emitted < cli.limit && !output.truncated {
-            let mut record = signals[index].record("event", time, Some(value), None)?;
-            record["sequence"] = emitted.to_string().into();
-            if line(output, &record)? {
-              emitted += 1;
-            }
-          }
-          Ok(())
-        })();
-        if let Err(error) = result {
-          callback_error = Some(error);
-          return ControlFlow::Break(());
         }
-        if cli.max_callbacks.is_some_and(|n| callbacks >= n) {
-          reason = Some("callback_budget_exhausted");
-          return ControlFlow::Break(());
-        }
-        ControlFlow::Continue(())
-      })
-      .map_err(|error| error.to_string())?;
+        Ok(())
+      })();
+      if let Err(error) = result {
+        callback_error = Some(error);
+        return ControlFlow::Break(());
+      }
+      if cli.max_callbacks.is_some_and(|n| callbacks >= n) {
+        reason = Some("callback_budget_exhausted");
+        return ControlFlow::Break(());
+      }
+      ControlFlow::Continue(())
+    })?;
   }
   let complete = reason.is_none();
   if complete {
@@ -403,10 +401,8 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
   if cli.summary && complete {
     for (signal, state) in signals.iter().zip(&mut states) {
       state.account(end);
-      let residency: BTreeMap<_, _> = ["0", "1", "x", "z", "other", "unavailable"]
-        .into_iter()
-        .zip(state.residency.map(|duration| duration.to_string()))
-        .collect();
+      let [zero, one, x, z, other, unavailable] =
+        state.residency.map(|duration| duration.to_string());
       if summary_rows >= cli.limit {
         continue;
       }
@@ -414,7 +410,14 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
         output,
         &json!({
           "type": "scalar_summary", "handle": u32::from(signal.handle),
-          "duration_ticks": (end - start).to_string(), "residency_ticks": residency,
+          "duration_ticks": (end - start).to_string(), "residency_ticks": {
+            "0": zero,
+            "1": one,
+            "x": x,
+            "z": z,
+            "other": other,
+            "unavailable": unavailable,
+          },
           "value_transitions": state.transitions.to_string(), "callbacks": state.callbacks.to_string(),
         }),
       )? {

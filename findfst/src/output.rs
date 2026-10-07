@@ -241,7 +241,10 @@ impl<'a, W: Write> Output<'a, W> {
     if self.cli.output_format() == Format::Text {
       if !scan.complete || truncated {
         eprintln!(
-          "findfst: status={}, output_truncated={}, observed_matches={}, emitted_matches={}, observed_omitted_matches={}, stop_reason={}",
+          concat!(
+            "findfst: status={}, output_truncated={}, observed_matches={}, ",
+            "emitted_matches={}, observed_omitted_matches={}, stop_reason={}"
+          ),
           if scan.complete { "complete" } else { "partial" },
           truncated,
           self.emitted + self.omitted,

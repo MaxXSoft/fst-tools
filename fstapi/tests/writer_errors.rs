@@ -366,3 +366,16 @@ fn implicit_time_zero_records_each_successful_value_change() {
     .unwrap();
   assert_eq!(changes, vec![(0, b"0".to_vec()), (0, b"1".to_vec())]);
 }
+#[test]
+fn errors_preserve_their_standard_error_sources() {
+  use std::error::Error as _;
+  let cause = std::ffi::CString::new(b"a\0b".to_vec()).unwrap_err();
+  let error = fstapi::Error::CStringConv(cause.clone());
+  let boxed: Box<dyn std::error::Error> = error.into();
+  assert!(boxed.downcast_ref::<fstapi::Error>().is_some());
+  assert_eq!(
+    boxed.source().unwrap().downcast_ref::<std::ffi::NulError>(),
+    Some(&cause)
+  );
+  assert!(fstapi::Error::ContextCreate.source().is_none());
+}
