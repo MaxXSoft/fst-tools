@@ -10,15 +10,34 @@ queryfst trace.fst --signals 'top\.core\.(stall|retire_valid)$' --summary --json
 queryfst trace.fst --signal top.core.retire_pc --json --max-rows 100 --max-bytes 65536
 ```
 
-Raw selection uses repeated `--signal EXACT_PATH` and/or `--signals REGEX`.
+Event selection uses repeated `--signal PATH` and/or `-S REGEX` (`--signals`).
 Their union selects physical handles, so aliases never duplicate callbacks.
 Missing exact paths and empty regex selections are errors. Anchoring a regex
 with `^` and `$` requests a whole-path match.
 
 ## SQL sampling
 
-Bind short SQL names to exact FST hierarchy paths, using a JSON object or repeated
-`--bind NAME=PATH` arguments. Signal names remain data rather than SQL syntax. Binding identifiers are case-sensitive.
+SQL can refer directly to an exact FST hierarchy path inside double quotes:
+
+```sh
+queryfst trace.fst --period 2 --sql \
+  'SELECT tick, raw("top.core.pc [31:0]") FROM samples
+   WHERE "top.core.retire_valid" = 1' --json
+```
+
+The entire dotted path is one quoted identifier; `samples."top.core.pc [31:0]"`
+is also supported. Embedded double quotes are doubled as in SQL identifiers.
+Paths and binding identifiers are case-sensitive, with no suffix or fuzzy
+matching. Missing or ambiguous paths are errors. Only referenced quoted paths
+are added to the decode mask, and aliases sharing a handle share decoding.
+
+For shorter names, use a JSON binding object or repeated `--bind NAME=PATH`.
+An explicit binding takes precedence over an equally named quoted path.
+`tick` and `sample_index` remain virtual columns even when quoted; use a binding
+with another name to refer to a root signal with either reserved name.
+`ORDER BY` output aliases keep their existing precedence over input columns.
+The JSON header includes the SQL text and explicit bindings for reproducibility.
+
 For example, save this object as `bindings.json`:
 
 ```json
@@ -88,9 +107,9 @@ unknown/unobserved values; `raw(signal)` retains width and leading zeroes.
 Numeric operations on known values exceeding the signed 128-bit range fail
 rather than truncate. Numeric ordering/group keys and `changed` use the same
 comparison range; use `changed(raw(wide_signal))` or group/order by `raw(wide_signal)`
-for exact arbitrary-width bit-string comparisons. All supplied bindings are
+for exact arbitrary-width bit-string comparisons. All explicit bindings are
 decoded, even when the SQL references only some of them; small binding maps
-reduce scanning work. Temporal expressions begin at the requested sample window;
+reduce scanning work. Direct quoted paths are discovered from SQL expressions. Temporal expressions begin at the requested sample window;
 the prior waveform state is reconstructed, but earlier handshakes/history are
 not replayed into those expressions.
 
