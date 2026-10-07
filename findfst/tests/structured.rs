@@ -330,7 +330,7 @@ fn empty_selection_is_a_completed_empty_search() {
 }
 
 #[test]
-fn wide_four_state_values_and_legacy_real_matching_keep_their_encodings() {
+fn wide_four_state_values_and_native_reals_keep_their_encodings() {
   let dir = test_dir();
   let path = dir.path().join("value-kinds.fst");
   let mut writer = Writer::create(&path, true).unwrap();
@@ -360,12 +360,13 @@ fn wide_four_state_values_and_legacy_real_matching_keep_their_encodings() {
     .iter()
     .find(|r| r["type"] == "match" && r["name"] == "real")
     .unwrap();
-  assert_eq!(real["encoding"], "real_decimal");
+  assert_eq!(real["encoding"], "real_f64_le_hex");
+  assert_eq!(real["value"], "010000000000f03f");
   let text = invoke(&path, &[".*", "--regex", "--signals", "^real$"]);
   assert!(text.status.success());
   assert_eq!(
     String::from_utf8(text.stdout).unwrap(),
-    format!("#0 real {}\n", real["value"].as_str().unwrap())
+    "#0 real 1.0000000000000002\n"
   );
 }
 
@@ -404,4 +405,55 @@ fn argument_diagnostics_respect_terminator_and_help() {
   let output = invoke(Path::new("missing.fst"), &["1", "--json", "--help"]);
   assert!(output.status.success());
   assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn real_matches_preserve_round_trip_values_signed_zero_and_nan_payloads() {
+  let dir = test_dir();
+  let path = dir.path().join("real-bits.fst");
+  let mut writer = Writer::create(&path, true).unwrap();
+  let real = writer
+    .create_var(var_type::VCD_REAL, var_dir::OUTPUT, 1, "real", None)
+    .unwrap();
+  let values = [
+    0x3ff0_0000_0000_0001u64,
+    0x8000_0000_0000_0000,
+    0x7ff0_0000_0000_0000,
+    0x7ff8_0000_0000_0042,
+    0xfff8_0000_0000_0081,
+  ];
+  for (tick, bits) in values.iter().enumerate() {
+    writer.emit_time_change(tick as u64).unwrap();
+    writer.emit_value_change(real, &bits.to_ne_bytes()).unwrap();
+  }
+  writer.emit_time_change(values.len() as u64).unwrap();
+  drop(writer);
+  let output = invoke(&path, &[".*", "--regex", "--all-matches", "--json"]);
+  let result = records(&output);
+  let matches: Vec<_> = result.iter().filter(|r| r["type"] == "match").collect();
+  assert_eq!(matches.len(), values.len());
+  for (record, bits) in matches.iter().zip(values) {
+    let expected = bits
+      .to_le_bytes()
+      .iter()
+      .map(|b| format!("{b:02x}"))
+      .collect::<String>();
+    assert_eq!(record["encoding"], "real_f64_le_hex");
+    assert_eq!(record["value"], expected);
+  }
+  for text in [
+    "1.0000000000000002",
+    "-0",
+    "inf",
+    "NaN(0x7ff8000000000042)",
+    "NaN(0xfff8000000000081)",
+  ] {
+    let pattern = format!("^{}$", regex::escape(text));
+    let output = invoke(&path, &[&pattern, "--regex", "--json"]);
+    assert_eq!(
+      records(&output).last().unwrap()["total_matches"],
+      "1",
+      "{text}"
+    );
+  }
 }

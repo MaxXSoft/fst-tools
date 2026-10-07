@@ -253,11 +253,8 @@ fn try_main(cli: Cli) -> Result<()> {
     )));
   }
   let vars = VarInfo::new(&mut reader, cli.signals.clone())?;
-  let catalog = if cli.output_format() == Format::Json {
-    output::Catalog::new(&mut reader, &vars)?
-  } else {
-    output::Catalog::default()
-  };
+  let catalog = output::Catalog::new(&mut reader, &vars, cli.output_format() == Format::Json)?;
+  reader.set_native_doubles_on_callback(true);
   match &vars {
     VarInfo::Map(vars) => {
       reader.clear_mask_all();

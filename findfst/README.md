@@ -77,12 +77,15 @@ Match values use these encodings:
 | `bits` | Logic-character string, preserving width, leading zeroes, and `x`/`z` |
 | `bytes_hex` | Lowercase hex for arbitrary variable-length bytes, including invalid UTF-8 and NUL |
 | `evcd` | Callback text containing values and drive strengths |
-| `real_decimal` | libfst's existing decimal real-value callback text |
+| `real_f64_le_hex` | Eight IEEE-754 bytes in little-endian order, encoded as lowercase hex |
 
-Real matching retains the original tool's decimal callback behavior in both
-formats. That formatting can round a double; it does **not** preserve original
-IEEE-754 bits. Use `queryfst` when exact real bits are needed. No lossy UTF-8
-replacement is performed; an unexpected non-UTF-8 callback uses `bytes_hex`.
+Real callbacks retain their IEEE-754 bits, including signed zero and NaN
+payloads. Regex matching and text output use round-trip decimal text for finite
+values (`1.0000000000000002`, for example), `inf` / `-inf` for infinities, and
+`NaN(0x7ff8000000000042)` for NaNs with their exact bits. JSON match values always
+use `real_f64_le_hex`; the header's `real_matching` describes the regex input.
+This replaces libfst's rounded decimal callbacks. No lossy UTF-8 replacement is
+performed; an unexpected non-UTF-8 callback uses `bytes_hex`.
 
 `summary.status` is `complete` or `partial`, and `execution_complete` indicates
 whether traversal finished normally. `output_truncated` is independent: a
