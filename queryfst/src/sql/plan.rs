@@ -2,6 +2,7 @@
 use super::context::Context as MatchContext;
 use super::deadline::Deadline;
 use super::{Cell, Column, MatchMode, Options, Report};
+use crate::error::{Error, Result};
 use sqlparser::ast::{
   self as ast, BinaryOperator as B, Expr as A, FunctionArg, FunctionArgExpr, FunctionArguments,
   GroupByExpr, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator as U,
@@ -10,8 +11,6 @@ use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
-
-type Result<T> = std::result::Result<T, String>;
 
 #[derive(Clone, Debug)]
 enum Expr {
@@ -58,7 +57,7 @@ impl Expr {
             .integer()?
             .map(|v| Cell::Integer(!v))
             .unwrap_or(Cell::Null),
-          _ => return Err(format!("unsupported unary operator {op}")),
+          _ => return Err(format!("unsupported unary operator {op}").into()),
         }
       }
       Self::Binary(op, left, right) => binary(op, left.eval(ctx)?, right.eval(ctx)?)?,
@@ -154,7 +153,7 @@ impl Expr {
             .integer()?
             .map(|v| Cell::Text(format!("{v:x}")))
             .unwrap_or(Cell::Null),
-          _ => return Err(format!("unknown function {name}")),
+          _ => return Err(format!("unknown function {name}").into()),
         }
       }
     })
@@ -216,7 +215,7 @@ fn binary(op: &B, left: Cell, right: Cell) -> Result<Cell> {
     B::BitwiseXor | B::PGBitwiseXor => Some(a ^ b),
     B::PGBitwiseShiftLeft if (0..128).contains(&b) => a.checked_shl(b as u32),
     B::PGBitwiseShiftRight if (0..128).contains(&b) => a.checked_shr(b as u32),
-    _ => return Err(format!("unsupported or invalid binary operator {op}")),
+    _ => return Err(format!("unsupported or invalid binary operator {op}").into()),
   }
   .ok_or("integer overflow or division by zero")?;
   Ok(Cell::Integer(value))
@@ -230,7 +229,7 @@ fn comparison(op: &B, order: Ordering) -> Result<bool> {
     B::GtEq => order != Ordering::Less,
     B::Lt => order == Ordering::Less,
     B::LtEq => order != Ordering::Greater,
-    _ => return Err(format!("invalid comparison {op}")),
+    _ => return Err(format!("invalid comparison {op}").into()),
   })
 }
 
@@ -355,7 +354,7 @@ impl Temporal {
           Cell::Integer(i128::from(self.run))
         }
       }
-      _ => return Err(format!("unknown temporal function {}", self.name)),
+      _ => return Err(format!("unknown temporal function {}", self.name).into()),
     })
   }
 }
@@ -392,9 +391,7 @@ impl Compiler<'_> {
       A::Nested(e) => self.compile(e, aggregate, grouped)?,
       A::Identifier(name) => {
         if grouped {
-          return Err(format!(
-            "column {name} must appear in GROUP BY or an aggregate"
-          ));
+          return Err(format!("column {name} must appear in GROUP BY or an aggregate").into());
         }
         Expr::Column(
           self
@@ -422,11 +419,11 @@ impl Compiler<'_> {
         ast::Value::HexStringLiteral(v) => Cell::Integer(
           i128::from_str_radix(v, 16).map_err(|_| "hex literal outside signed 128-bit range")?,
         ),
-        _ => return Err(format!("unsupported literal {value}")),
+        _ => return Err(format!("unsupported literal {value}").into()),
       }),
       A::UnaryOp { op, expr } => {
         if !matches!(op, U::Not | U::Plus | U::Minus | U::PGBitwiseNot) {
-          return Err(format!("unsupported unary operator {op}"));
+          return Err(format!("unsupported unary operator {op}").into());
         }
         Expr::Unary(*op, Box::new(self.compile(expr, aggregate, grouped)?))
       }
@@ -457,7 +454,7 @@ impl Compiler<'_> {
             | B::PGBitwiseShiftRight
             | B::StringConcat
         ) {
-          return Err(format!("unsupported binary operator {op}"));
+          return Err(format!("unsupported binary operator {op}").into());
         }
         Expr::Binary(
           op.clone(),
@@ -559,7 +556,7 @@ impl Compiler<'_> {
         ),
       ),
       A::Function(function) => self.function(function, aggregate, grouped)?,
-      _ => return Err(format!("unsupported SQL expression {expr}")),
+      _ => return Err(format!("unsupported SQL expression {expr}").into()),
     })
   }
 
@@ -596,7 +593,7 @@ impl Compiler<'_> {
         );
       }
       if args.len() != 1 {
-        return Err(format!("{name} requires one argument"));
+        return Err(format!("{name} requires one argument").into());
       }
       let key = function.to_string();
       if let Some(index) = self.aggregate_keys.get(&key) {
@@ -649,7 +646,7 @@ impl Compiler<'_> {
         1
       };
       if args.len() != arity {
-        return Err(format!("{name} requires {arity} arguments"));
+        return Err(format!("{name} requires {arity} arguments").into());
       }
       let key = function.to_string();
       if let Some(index) = self.temporal_keys.get(&key) {
@@ -698,10 +695,10 @@ impl Compiler<'_> {
       "coalesce" => !args.is_empty(),
       "known" | "is_known" | "abs" | "hex" => args.len() == 1,
       "bit" => args.len() == 2,
-      _ => return Err(format!("unsupported function {name}")),
+      _ => return Err(format!("unsupported function {name}").into()),
     };
     if !valid_arity {
-      return Err(format!("invalid number of arguments for {name}"));
+      return Err(format!("invalid number of arguments for {name}").into());
     }
     Ok(Expr::Function(
       name,
@@ -810,7 +807,7 @@ impl Plan {
     schema: &HashMap<String, (usize, u32)>,
     options: &Options,
   ) -> Result<Self> {
-    let mut statements = Parser::parse_sql(&GenericDialect {}, sql).map_err(|e| e.to_string())?;
+    let mut statements = Parser::parse_sql(&GenericDialect {}, sql)?;
     if statements.len() != 1 {
       return Err("exactly one SELECT statement is required".into());
     }
@@ -1096,8 +1093,8 @@ impl Plan {
         .collect::<Result<Vec<_>>>()?;
       self.temporal_values[i] = match self.temporal[i].advance(args) {
         Ok(value) => value,
-        Err(reason) if reason == "pending_request_budget" => {
-          report.stop_reason = Some(reason);
+        Err(Error::PendingRequestBudget) => {
+          report.stop_reason = Some("pending_request_budget".into());
           return Ok(false);
         }
         Err(error) => return Err(error),

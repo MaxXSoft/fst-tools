@@ -52,7 +52,7 @@ impl Catalog {
       if var.is_alias() {
         signals
           .get_mut(&var.handle())
-          .ok_or_else(|| Error::Arguments("alias precedes its physical signal".into()))?
+          .ok_or_else(|| Error::Internal("alias precedes its physical signal"))?
           .aliases
           .push(path);
       } else {
@@ -125,14 +125,24 @@ impl<'a, W: Write> Output<'a, W> {
       return Ok(output);
     }
     let header = json_line(&json!({
-      "type": "header", "schema": "findfst", "schema_version": 1,
-      "file": cli.file, "trace_start": reader.start_time().to_string(),
-      "trace_end": reader.end_time().to_string(), "start": start.to_string(), "end": end.to_string(),
-      "timescale_exponent": reader.timescale(), "timezero": reader.timezero().to_string(),
-      "interval": "inclusive", "match_semantics": "in_range_callbacks_only",
+      "type": "header",
+      "schema": "findfst",
+      "schema_version": 1,
+      "file": cli.file,
+      "trace_start": reader.start_time().to_string(),
+      "trace_end": reader.end_time().to_string(),
+      "start": start.to_string(),
+      "end": end.to_string(),
+      "timescale_exponent": reader.timescale(),
+      "timezero": reader.timezero().to_string(),
+      "interval": "inclusive",
+      "match_semantics": "in_range_callbacks_only",
       "mode": if cli.all_matches { "all_matches" } else { "first_per_handle" },
-      "value_pattern": cli.value, "value_regex": cli.regex, "hex": cli.hex,
-      "event_order": "libfst_callback_order", "real_values": "libfst_default_decimal",
+      "value_pattern": cli.value,
+      "value_regex": cli.regex,
+      "hex": cli.hex,
+      "event_order": "libfst_callback_order",
+      "real_values": "libfst_default_decimal",
       "limits": {
         "max_rows": cli.max_rows.map(|n| n.to_string()),
         "max_bytes": cli.max_bytes.map(|n| n.to_string()),
@@ -148,14 +158,20 @@ impl<'a, W: Write> Output<'a, W> {
     output.write(&header)?;
     for (&handle, signal) in &catalog.0 {
       output.metadata(&json!({
-        "type": "signal", "handle": u32::from(handle), "name": signal.name,
-        "canonical_name": signal.canonical_name, "aliases": signal.aliases,
-        "width": signal.width, "var_type": signal.ty, "encoding": signal.encoding(),
+        "type": "signal",
+        "handle": u32::from(handle),
+        "name": signal.name,
+        "canonical_name": signal.canonical_name,
+        "aliases": signal.aliases,
+        "width": signal.width,
+        "var_type": signal.ty,
+        "encoding": signal.encoding(),
       }))?;
     }
     for (time, active) in reader.dump_activity() {
-      output
-        .metadata(&json!({"type": "dump_activity", "time": time.to_string(), "active": active}))?;
+      output.metadata(&json!({"type": "dump_activity",
+        "time": time.to_string(),
+        "active": active}))?;
     }
     Ok(output)
   }
@@ -212,9 +228,15 @@ impl<'a, W: Write> Output<'a, W> {
         },
       };
       json_line(&json!({
-        "type": "match", "sequence": self.emitted.to_string(), "time": time.to_string(),
-        "handle": u32::from(handle), "name": name, "width": signal.width,
-        "var_type": signal.ty, "encoding": encoding, "value": value,
+        "type": "match",
+        "sequence": self.emitted.to_string(),
+        "time": time.to_string(),
+        "handle": u32::from(handle),
+        "name": name,
+        "width": signal.width,
+        "var_type": signal.ty,
+        "encoding": encoding,
+        "value": value,
       }))?
     } else {
       let mut bytes = Vec::new();
@@ -256,17 +278,24 @@ impl<'a, W: Write> Output<'a, W> {
       return Ok(());
     }
     let mut footer = json!({
-      "type": "summary", "status": if scan.complete { "complete" } else { "partial" },
-      "execution_complete": scan.complete, "stop_reason": scan.stop_reason,
-      "complete": scan.complete, "reason": scan.stop_reason, "unprocessed_input": !scan.complete,
+      "type": "summary",
+      "status": if scan.complete { "complete" } else { "partial" },
+      "execution_complete": scan.complete,
+      "stop_reason": scan.stop_reason,
+      "complete": scan.complete,
+      "reason": scan.stop_reason,
+      "unprocessed_input": !scan.complete,
       "last_callback_time": scan.last_callback_time.map(|time| time.to_string()),
       "processed_through": scan.processed_through.map(|time| time.to_string()),
-      "output_truncated": truncated, "metadata_complete": self.omitted_metadata == 0,
+      "output_truncated": truncated,
+      "metadata_complete": self.omitted_metadata == 0,
       "omitted_metadata_records": self.omitted_metadata.to_string(),
-      "selected_handles": selected, "decoded_callbacks": scan.callbacks.to_string(),
+      "selected_handles": selected,
+      "decoded_callbacks": scan.callbacks.to_string(),
       "observed_matches": (self.emitted + self.omitted).to_string(),
       "total_matches": scan.complete.then(|| (self.emitted + self.omitted).to_string()),
-      "emitted_matches": self.emitted.to_string(), "observed_omitted_matches": self.omitted.to_string(),
+      "emitted_matches": self.emitted.to_string(),
+      "observed_omitted_matches": self.omitted.to_string(),
       "total_omitted_matches": scan.complete.then(|| self.omitted.to_string()),
       "stdout_bytes": "0",
     });
@@ -280,8 +309,8 @@ impl<'a, W: Write> Output<'a, W> {
       footer["stdout_bytes"] = total.into();
     };
     if bytes.len() as u64 > FOOTER_RESERVE {
-      return Err(Error::Arguments(
-        "internal footer exceeds reserved output space".into(),
+      return Err(Error::Internal(
+        "internal footer exceeds reserved output space",
       ));
     }
     self.write(&bytes)

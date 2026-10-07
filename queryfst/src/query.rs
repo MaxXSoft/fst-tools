@@ -1,14 +1,10 @@
-use crate::{Cli, output::Output};
+use crate::{Cli, Error, Result, output::Output};
 use fstapi::{Handle, Reader, VarType, var_type};
-use regex::Regex;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::error::Error;
 use std::io::Write;
 use std::ops::ControlFlow;
 use std::time::Instant;
-
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 /// One physical facility and its hierarchy names, in handle order.
 struct Signal {
@@ -69,8 +65,11 @@ impl Signal {
     source_time: Option<u64>,
   ) -> Result<Value> {
     Ok(json!({
-      "type": kind, "time": time.to_string(), "handle": u32::from(self.handle),
-      "encoding": self.encoding(), "value": value.map(|value| self.value(value)).transpose()?,
+      "type": kind,
+      "time": time.to_string(),
+      "handle": u32::from(self.handle),
+      "encoding": self.encoding(),
+      "value": value.map(|value| self.value(value)).transpose()?,
       "source_time": source_time.map(|time| time.to_string()),
     }))
   }
@@ -121,7 +120,7 @@ fn line(output: &mut Output<impl Write>, record: &Value) -> Result<bool> {
 
 /// Selects handles first, then collects canonical paths and every alias.
 fn select(reader: &mut Reader, cli: &Cli) -> Result<Vec<Signal>> {
-  let regex = cli.signals.as_deref().map(Regex::new).transpose()?;
+  let regex = cli.signals.as_ref();
   let mut missing: HashSet<&str> = cli.signal.iter().map(String::as_str).collect();
   let exact = missing.clone();
   let mut handles = HashSet::new();
@@ -231,14 +230,11 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
   let start = cli.start.unwrap_or(reader.start_time());
   let end = cli.end.unwrap_or(reader.end_time());
   if start > end || start < reader.start_time() || end > reader.end_time() {
-    return Err(
-      format!(
-        "range must satisfy {} <= start <= end <= {} (raw FST ticks)",
-        reader.start_time(),
-        reader.end_time()
-      )
-      .into(),
-    );
+    return Err(Error::Arguments(format!(
+      "range must satisfy {} <= start <= end <= {} (raw FST ticks)",
+      reader.start_time(),
+      reader.end_time()
+    )));
   }
   let signals = select(&mut reader, &cli)?;
   if cli.summary
@@ -246,7 +242,9 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
       signal.width != 1 || signal.encoding() != "bits" || signal.ty == var_type::VCD_EVENT
     })
   {
-    return Err("--summary requires scalar state signals (one-bit logic, excluding events)".into());
+    return Err(Error::Arguments(
+      "--summary requires scalar state signals (one-bit logic, excluding events)".into(),
+    ));
   }
   let activity = reader.dump_activity();
   if cli.summary && recording_interruption(&activity, start, end) {
@@ -269,22 +267,34 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
   line(
     output,
     &json!({
-      "type": "header", "schema": "queryfst", "schema_version": 2,
-      "start": start.to_string(), "end": end.to_string(),
-      "trace_start": reader.start_time().to_string(), "trace_end": reader.end_time().to_string(),
-      "timescale_exponent": reader.timescale(), "timezero": reader.timezero().to_string(),
-      "interval": "inclusive", "initial_semantics": "latest_callback_strictly_before_start",
-      "event_order": "libfst_callback_order", "limit": cli.limit.to_string(),
+      "type": "header",
+      "schema": "queryfst",
+      "schema_version": 2,
+      "start": start.to_string(),
+      "end": end.to_string(),
+      "trace_start": reader.start_time().to_string(),
+      "trace_end": reader.end_time().to_string(),
+      "timescale_exponent": reader.timescale(),
+      "timezero": reader.timezero().to_string(),
+      "interval": "inclusive",
+      "initial_semantics": "latest_callback_strictly_before_start",
+      "event_order": "libfst_callback_order",
+      "limit": cli.max_rows.to_string(),
       "mode": if cli.summary { "scalar_summary" } else { "events" },
-      "scan_start": scan_start.to_string(), "early_termination": true,
+      "scan_start": scan_start.to_string(),
+      "early_termination": true,
     }),
   )?;
   for signal in &signals {
     line(
       output,
       &json!({
-        "type": "signal", "handle": u32::from(signal.handle), "path": signal.path,
-        "aliases": signal.aliases, "width": signal.width, "var_type": signal.ty,
+        "type": "signal",
+        "handle": u32::from(signal.handle),
+        "path": signal.path,
+        "aliases": signal.aliases,
+        "width": signal.width,
+        "var_type": signal.ty,
         "encoding": signal.encoding(),
       }),
     )?;
@@ -292,7 +302,9 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
   for &(time, active) in &activity {
     line(
       output,
-      &json!({"type": "dump_activity", "time": time.to_string(), "active": active}),
+      &json!({"type": "dump_activity",
+      "time": time.to_string(),
+      "active": active}),
     )?;
   }
 
@@ -367,7 +379,7 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
           }
           state.previous = Some(value.to_vec());
           state.callbacks += 1;
-        } else if emitted < cli.limit && !output.truncated {
+        } else if emitted < cli.max_rows && !output.truncated {
           let mut record = signals[index].record("event", time, Some(value), None)?;
           record["sequence"] = emitted.to_string().into();
           if line(output, &record)? {
@@ -403,14 +415,16 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
       state.account(end);
       let [zero, one, x, z, other, unavailable] =
         state.residency.map(|duration| duration.to_string());
-      if summary_rows >= cli.limit {
+      if summary_rows >= cli.max_rows {
         continue;
       }
       if line(
         output,
         &json!({
-          "type": "scalar_summary", "handle": u32::from(signal.handle),
-          "duration_ticks": (end - start).to_string(), "residency_ticks": {
+          "type": "scalar_summary",
+          "handle": u32::from(signal.handle),
+          "duration_ticks": (end - start).to_string(),
+          "residency_ticks": {
             "0": zero,
             "1": one,
             "x": x,
@@ -418,7 +432,8 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
             "other": other,
             "unavailable": unavailable,
           },
-          "value_transitions": state.transitions.to_string(), "callbacks": state.callbacks.to_string(),
+          "value_transitions": state.transitions.to_string(),
+          "callbacks": state.callbacks.to_string(),
         }),
       )? {
         summary_rows += 1;
@@ -431,12 +446,21 @@ pub(super) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
     matched > emitted
   };
   output.finish(json!({
-      "type": "summary", "complete": complete, "reason": reason,
-      "output_reason": truncated.then_some("row_budget_exhausted"), "status": if complete { "complete" } else { "partial" },
-      "processed_through": processed_through.map(|t| t.to_string()), "last_callback_time": last_callback_time.map(|t| t.to_string()),
-      "unprocessed_input": !complete, "aggregate_final": complete, "output_truncated": truncated, "selected_handles": signals.len(),
-      "decoded_callbacks": callbacks.to_string(), "matching_callbacks": matched.to_string(),
-      "emitted_events": emitted.to_string(), "emitted_rows": (emitted + summary_rows).to_string(),
+      "type": "summary",
+      "complete": complete,
+      "reason": reason,
+      "output_reason": truncated.then_some("row_budget_exhausted"),
+      "status": if complete { "complete" } else { "partial" },
+      "processed_through": processed_through.map(|t| t.to_string()),
+      "last_callback_time": last_callback_time.map(|t| t.to_string()),
+      "unprocessed_input": !complete,
+      "aggregate_final": complete,
+      "output_truncated": truncated,
+      "selected_handles": signals.len(),
+      "decoded_callbacks": callbacks.to_string(),
+      "matching_callbacks": matched.to_string(),
+      "emitted_events": emitted.to_string(),
+      "emitted_rows": (emitted + summary_rows).to_string(),
       "omitted_events": complete.then(|| if cli.summary { "0".to_string() } else { (matched - emitted).to_string() }),
       "observed_omitted_events": if cli.summary { "0".to_string() } else { (matched - emitted).to_string() },
       "truncated": truncated,

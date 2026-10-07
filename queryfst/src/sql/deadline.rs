@@ -2,6 +2,7 @@
 //! Responses at the deadline sample satisfy the oldest outstanding request of
 //! the same key. Pending requests at EOF are unresolved, never counted as late.
 use super::Cell;
+use crate::error::{Error, Result};
 use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Debug)]
@@ -36,7 +37,7 @@ impl Deadline {
       .sum()
   }
 
-  pub fn step(&mut self, args: &[Cell]) -> Result<Cell, String> {
+  pub fn step(&mut self, args: &[Cell]) -> Result<Cell> {
     if !(3..=4).contains(&args.len()) {
       return Err("timeouts requires request, response, deadline cycles, and optional key".into());
     }
@@ -82,7 +83,7 @@ impl Deadline {
     }
     if req == Some(true) && !immediate {
       if self.count >= self.limit {
-        return Err("pending_request_budget".into());
+        return Err(Error::PendingRequestBudget);
       }
       self
         .pending
