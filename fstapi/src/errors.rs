@@ -141,6 +141,23 @@ impl fmt::Display for Error {
   }
 }
 
+impl std::error::Error for Error {
+  fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+    match self {
+      Self::InvalidUtf8Str(Some(error)) => Some(error),
+      Self::CStrConv(error) => Some(error),
+      Self::CStringConv(error) => Some(error),
+      Self::InvalidVariableDefinition(error) => Some(error),
+      Self::InvalidCallbackData(_, error) => Some(error),
+      _ => None,
+    }
+  }
+}
+
+impl std::error::Error for VariableDefinitionError {}
+
+impl std::error::Error for CallbackError {}
+
 impl fmt::Display for VariableDefinitionError {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self {

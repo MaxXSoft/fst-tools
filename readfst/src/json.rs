@@ -116,13 +116,12 @@ impl Document {
         Hier::Scope(scope) => {
           path.push(scope.name()?.to_owned());
           if let Some(scopes) = result.scopes.as_mut() {
-            let type_code = scope.ty();
             scopes.push(JsonScope {
+              type_code: scope.ty(),
               info: ScopeInfo::new(scope)?,
               hierarchy_index,
               full_name: path.join("."),
               path: path.clone(),
-              type_code,
             });
           }
         }

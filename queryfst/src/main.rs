@@ -165,7 +165,7 @@ fn run_sql(
 ) -> Result<(), Box<dyn std::error::Error>> {
   use serde_json::json;
   use std::collections::BTreeMap;
-  let mut reader = fstapi::Reader::open(&cli.input).map_err(|e| e.to_string())?;
+  let mut reader = fstapi::Reader::open(&cli.input)?;
   let start = cli.start.unwrap_or(reader.start_time());
   let end = cli.end.unwrap_or(reader.end_time());
   let mut bindings: BTreeMap<String, String> = if let Some(path) = &cli.bindings {
