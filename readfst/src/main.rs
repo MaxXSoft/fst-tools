@@ -7,7 +7,6 @@ mod vars;
 
 use clap::{CommandFactory, Parser, ValueEnum, error::ErrorKind};
 use fstapi::Reader;
-use regex::Regex;
 use section::Print;
 use std::io::{self, Write};
 use std::process;
@@ -70,7 +69,7 @@ enum Format {
   )
 )]
 struct Cli {
-  /// FST waveform file.
+  /// Input FST waveform file.
   file: String,
 
   /// Equivalent to: -m -v -s -A.
@@ -89,8 +88,8 @@ struct Cli {
   #[arg(long)]
   no_aliases: bool,
 
-  /// Only display variable name.
-  #[arg(long)]
+  /// Print only signal names to stdout.
+  #[arg(short = 'n', long)]
   names_only: bool,
 
   /// Display all scopes.
@@ -105,9 +104,9 @@ struct Cli {
   #[arg(long, value_enum, default_value = "table")]
   format: Format,
 
-  /// Include only variables whose full names match this regular expression.
-  #[arg(long, value_name = "REGEX")]
-  signals: Option<Regex>,
+  /// Regular expression matching full hierarchical signal paths.
+  #[arg(short = 'S', long, value_name = "REGEX")]
+  signals: Option<regex::Regex>,
 }
 
 fn main() {

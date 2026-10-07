@@ -57,7 +57,7 @@ fn finds_exact_hex_regex_and_alias_filtered_values() {
     "top.data\n"
   );
   assert_eq!(
-    run(&["11", "--signals", "^top\\.alias$", "--names-only"]),
+    run(&["11", "-S", "^top\\.alias$", "--names-only"]),
     "top.alias\n"
   );
   assert_eq!(run(&["1111"]), "");

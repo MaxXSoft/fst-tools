@@ -106,7 +106,7 @@ fn structured_argument_and_execution_errors() {
   let output = invoke(Path::new("missing.fst"), &["--json", "--signal", "a"]);
   assert!(!output.status.success());
   let error: Value = serde_json::from_slice(&output.stderr).unwrap();
-  assert_eq!(error["code"], "query_error");
+  assert_eq!(error["code"], "input_error");
 }
 
 #[test]
@@ -174,4 +174,78 @@ fn first_and_last_expand_match_context_without_losing_the_trigger() {
     serde_json::from_slice::<Value>(&invalid.stderr).unwrap()["type"],
     "error"
   );
+}
+
+#[test]
+fn sql_only_options_require_sql_even_when_explicitly_equal_to_defaults() {
+  for (flag, value) in [
+    ("--bindings", "map.json"),
+    ("--bind", "a=a"),
+    ("--period", "1"),
+    ("--phase", "0"),
+    ("--max-samples", "0"),
+    ("--max-groups", "100000"),
+    ("--max-buffer-rows", "100000"),
+    ("--matches", "all"),
+    ("--before", "0"),
+    ("--after", "0"),
+  ] {
+    let output = invoke(
+      Path::new("missing.fst"),
+      &["--signal", "a", "--json", flag, value],
+    );
+    assert_eq!(output.status.code(), Some(2), "{flag}");
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["code"], "invalid_arguments", "{flag}");
+    assert!(output.stdout.is_empty());
+  }
+  let missing_period = invoke(
+    Path::new("missing.fst"),
+    &["--sql", "SELECT tick FROM samples", "--json"],
+  );
+  assert_eq!(missing_period.status.code(), Some(2));
+}
+
+#[test]
+fn diagnostics_respect_terminator_and_help() {
+  let output = Command::new(env!("CARGO_BIN_EXE_queryfst"))
+    .args(["--", "--json"])
+    .output()
+    .unwrap();
+  assert_eq!(output.status.code(), Some(2));
+  assert!(String::from_utf8_lossy(&output.stderr).starts_with("error:"));
+  for format in ["--format=json", "--format=jsonl", "--json"] {
+    let output = invoke(Path::new("missing.fst"), &[format]);
+    assert_eq!(
+      serde_json::from_slice::<Value>(&output.stderr).unwrap()["code"],
+      "invalid_arguments"
+    );
+    let help = invoke(Path::new("missing.fst"), &[format, "--help"]);
+    assert!(help.status.success());
+    assert!(help.stderr.is_empty());
+  }
+}
+
+#[test]
+fn binding_diagnostics_identify_the_rejected_argument() {
+  let dir = tempfile::tempdir_in(std::env::current_exe().unwrap().parent().unwrap()).unwrap();
+  let path = dir.path().join("input.fst");
+  fixture(&path);
+  for binding in ["broken binding", "=a", "a="] {
+    let output = invoke(
+      &path,
+      &[
+        "--sql",
+        "SELECT tick FROM samples",
+        "--period",
+        "1",
+        "--bind",
+        binding,
+        "--json",
+      ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert!(error["message"].as_str().unwrap().contains(binding));
+  }
 }

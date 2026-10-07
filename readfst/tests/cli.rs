@@ -329,7 +329,7 @@ fn filtered_alias_retains_canonical_name_in_json_and_table_modes() {
   ] {
     let result = Command::new(env!("CARGO_BIN_EXE_readfst"))
       .arg(&path)
-      .args(["--vars", "--signals", "alias$"])
+      .args(["--vars", "-S", "alias$"])
       .args(extra)
       .output()
       .unwrap();

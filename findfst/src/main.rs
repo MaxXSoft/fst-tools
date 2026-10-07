@@ -5,7 +5,7 @@ mod output;
 mod printer;
 
 use checker::VarInfo;
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, Parser, ValueEnum, error::ErrorKind};
 use find::{MatchInfo, find_value};
 use fstapi::Reader;
 use std::io::Write;
@@ -16,6 +16,7 @@ enum Error {
   Output(io::Error),
   Json(serde_json::Error),
   Arguments(String),
+  Internal(&'static str),
 }
 
 impl fmt::Display for Error {
@@ -25,6 +26,7 @@ impl fmt::Display for Error {
       Self::Output(e) => write!(f, "failed to write output: {e}"),
       Self::Json(e) => write!(f, "failed to encode output: {e}"),
       Self::Arguments(e) => e.fmt(f),
+      Self::Internal(e) => f.write_str(e),
     }
   }
 }
@@ -54,6 +56,7 @@ impl Error {
       Self::Output(_) => "output_error",
       Self::Json(_) => "encoding_error",
       Self::Arguments(_) => "invalid_arguments",
+      Self::Internal(_) => "internal_error",
     }
   }
 
@@ -69,7 +72,6 @@ impl Error {
 /// Text remains the default; JSON is a stream of newline-delimited records.
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Format {
-  #[value(alias = "human")]
   Text,
   #[value(alias = "jsonl")]
   Json,
@@ -92,7 +94,7 @@ type Result<T> = std::result::Result<T, Error>;
   )
 )]
 struct Cli {
-  /// FST waveform file.
+  /// Input FST waveform file.
   file: String,
 
   /// The value to find, in binary format by default.
@@ -111,27 +113,27 @@ struct Cli {
   #[arg(short, long)]
   regex: bool,
 
-  /// Find value in matching signals only, support regex.
-  #[arg(short, long)]
-  signals: Option<String>,
+  /// Regular expression matching full hierarchical signal paths.
+  #[arg(short = 'S', long, value_name = "REGEX")]
+  signals: Option<regex::Regex>,
 
   /// Print only signal names to stdout.
   #[arg(short, long)]
   names_only: bool,
 
-  /// Output format; json emits versioned JSON Lines.
+  /// Output presentation. JSON is a versioned stream of JSON Lines.
   #[arg(long, value_enum, conflicts_with = "json")]
   format: Option<Format>,
 
-  /// Equivalent to --format json.
+  /// Shortcut for --format json.
   #[arg(long)]
   json: bool,
 
-  /// Inclusive lower timestamp in raw FST ticks.
+  /// Inclusive start timestamp in raw FST ticks; defaults to the trace start.
   #[arg(long)]
   start: Option<u64>,
 
-  /// Inclusive upper timestamp in raw FST ticks.
+  /// Inclusive end timestamp in raw FST ticks; defaults to the trace end.
   #[arg(long)]
   end: Option<u64>,
 
@@ -139,7 +141,7 @@ struct Cli {
   #[arg(long)]
   max_rows: Option<u64>,
 
-  /// Maximum total stdout bytes, including JSON metadata and footer; minimum 4096.
+  /// Total stdout byte budget including metadata and final summary; minimum 4096.
   #[arg(long)]
   max_bytes: Option<u64>,
 
@@ -147,7 +149,7 @@ struct Cli {
   #[arg(long)]
   max_callbacks: Option<u64>,
 
-  /// Cooperative traversal deadline, checked at callback boundaries.
+  /// Cooperative scan duration budget; block decompression is not preempted.
   #[arg(long)]
   max_duration_ms: Option<u64>,
 }
@@ -192,11 +194,20 @@ fn report_error(json: bool, code: &str, message: &str, exit_code: i32) {
     eprintln!(
       "{}",
       serde_json::json!({
-        "schema": "findfst", "schema_version": 1, "type": "error",
-        "code": code, "message": message, "exit_code": exit_code,
+        "schema": "findfst",
+        "schema_version": 1,
+        "type": "error",
+        "code": code,
+        "message": message,
+        "exit_code": exit_code,
       })
     );
   } else {
+    if exit_code == 2 {
+      Cli::command()
+        .error(ErrorKind::ValueValidation, message)
+        .exit();
+    }
     eprintln!("Failed to find in FST waveform: {message}!");
   }
 }
@@ -206,7 +217,7 @@ fn main() {
   let requested_json = json_requested(&args);
   let cli = match Cli::try_parse_from(args) {
     Ok(cli) => cli,
-    Err(error) if error.use_stderr() => {
+    Err(error) if requested_json && error.use_stderr() => {
       report_error(requested_json, "invalid_arguments", &error.to_string(), 2);
       process::exit(2);
     }
@@ -220,7 +231,7 @@ fn main() {
 }
 
 fn try_main(cli: Cli) -> Result<()> {
-  if cli.output_format() == Format::Json && cli.names_only {
+  if cli.output_format() != Format::Text && cli.names_only {
     return Err(Error::Arguments("--names-only requires text output".into()));
   }
   if cli.max_bytes.is_some_and(|limit| limit < output::MIN_BYTES) {
@@ -231,12 +242,6 @@ fn try_main(cli: Cli) -> Result<()> {
   }
   let match_info = MatchInfo::new(cli.value.clone(), cli.hex, cli.regex)
     .map_err(|error| Error::Arguments(error.to_string()))?;
-  let signal_re = cli
-    .signals
-    .as_deref()
-    .map(regex::Regex::new)
-    .transpose()
-    .map_err(|error| Error::Arguments(format!("Invalid signal regex: {error}")))?;
   let mut reader = Reader::open(&cli.file)?;
   let start = cli.start.unwrap_or(reader.start_time());
   let end = cli.end.unwrap_or(reader.end_time());
@@ -247,7 +252,7 @@ fn try_main(cli: Cli) -> Result<()> {
       reader.end_time()
     )));
   }
-  let vars = VarInfo::new(&mut reader, signal_re)?;
+  let vars = VarInfo::new(&mut reader, cli.signals.clone())?;
   let catalog = if cli.output_format() == Format::Json {
     output::Catalog::new(&mut reader, &vars)?
   } else {

@@ -1,4 +1,5 @@
 //! Finite SQL queries over explicitly sampled waveform state.
+use crate::error::{Error, Result};
 mod context;
 mod deadline;
 mod plan;
@@ -32,7 +33,7 @@ impl Cell {
   }
 
   /// Converts known logic to integers while retaining unknown/wide values.
-  fn logic(bytes: &[u8]) -> Result<Self, String> {
+  fn logic(bytes: &[u8]) -> Result<Self> {
     if bytes.iter().all(|c| matches!(c, b'0' | b'1')) && bytes.len() <= 127 {
       Ok(Self::Integer(
         bytes.iter().fold(0, |v, c| (v << 1) | i128::from(c - b'0')),
@@ -57,18 +58,14 @@ impl Cell {
           | b'-'
       )
     }) {
-      Ok(Self::Bits(
-        std::str::from_utf8(bytes)
-          .map_err(|e| e.to_string())?
-          .into(),
-      ))
+      Ok(Self::Bits(std::str::from_utf8(bytes)?.into()))
     } else {
       Err("SQL sampling currently accepts fixed-width logic signals only".into())
     }
   }
 
   /// Numeric operators propagate unknown values; oversized known values error.
-  fn integer(&self) -> Result<Option<i128>, String> {
+  fn integer(&self) -> Result<Option<i128>> {
     match self {
       Self::Null => Ok(None),
       Self::Bool(v) => Ok(Some(i128::from(*v))),
@@ -84,7 +81,7 @@ impl Cell {
   }
 
   /// Canonicalizes SQL-equivalent known numeric keys without losing unknown bits.
-  fn normalized(self) -> Result<Self, String> {
+  fn normalized(self) -> Result<Self> {
     match &self {
       Self::Bool(value) => Ok(Self::Integer(i128::from(*value))),
       Self::Bits(bits) if bits.bytes().all(|b| matches!(b, b'0' | b'1')) => {
@@ -95,7 +92,7 @@ impl Cell {
   }
 
   /// SQL predicates use three-valued truth, with integer zero treated as false.
-  fn truth(&self) -> Result<Option<bool>, String> {
+  fn truth(&self) -> Result<Option<bool>> {
     Ok(self.integer()?.map(|v| v != 0))
   }
 }
@@ -167,17 +164,21 @@ pub struct Report {
 pub fn execute(
   reader: &mut Reader,
   options: &Options,
-  mut emit: impl FnMut(&[Column], &[Cell]) -> Result<bool, String>,
-) -> Result<Report, String> {
+  mut emit: impl FnMut(&[Column], &[Cell]) -> Result<bool>,
+) -> Result<Report> {
   if options.start > options.end
     || options.start < reader.start_time()
     || options.end > reader.end_time()
   {
-    return Err("SQL range must be contained in the waveform and satisfy start <= end".into());
+    return Err(Error::Arguments(
+      "SQL range must be contained in the waveform and satisfy start <= end".into(),
+    ));
   }
   let Sampling::Period { period, phase } = options.sampling;
   if period == 0 || phase >= period {
-    return Err("sampling requires period > 0 and phase < period".into());
+    return Err(Error::Arguments(
+      "sampling requires period > 0 and phase < period".into(),
+    ));
   }
   let activity = reader.dump_activity();
   let mut active = true;
@@ -211,7 +212,7 @@ pub fn execute(
   let mut found = vec![false; names.len()];
   let mut handles = Vec::new();
   for entry in reader.vars() {
-    let (path, var) = entry.map_err(|e| e.to_string())?;
+    let (path, var) = entry?;
     if let Some(indices) = paths.get(path.as_str()) {
       if var.length() == 0
         || matches!(
@@ -224,7 +225,7 @@ pub fn execute(
             | fstapi::var_type::VCD_PORT
         )
       {
-        return Err(format!("binding {path} is not fixed-width logic"));
+        return Err(format!("binding {path} is not fixed-width logic").into());
       }
       for &i in indices {
         widths[i] = var.length();
@@ -238,16 +239,19 @@ pub fn execute(
     }
   }
   if found.iter().any(|v| !v) {
-    return Err(format!(
-      "missing bound signals: {}",
-      names
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !found[*i])
-        .map(|(_, n)| n.as_str())
-        .collect::<Vec<_>>()
-        .join(", ")
-    ));
+    return Err(
+      format!(
+        "missing bound signals: {}",
+        names
+          .iter()
+          .enumerate()
+          .filter(|(i, _)| !found[*i])
+          .map(|(_, n)| n.as_str())
+          .collect::<Vec<_>>()
+          .join(", ")
+      )
+      .into(),
+    );
   }
   let schema: HashMap<_, _> = names
     .iter()
@@ -325,7 +329,7 @@ pub fn execute(
                           values: &mut [Cell],
                           observed: &[Option<u64>],
                           report: &mut Report|
-   -> Result<bool, String> {
+   -> Result<bool> {
     if !initialized {
       for (i, time) in observed.iter().enumerate() {
         if time.is_some_and(|time| {
@@ -377,60 +381,57 @@ pub fn execute(
     return Ok(report);
   }
   let mut last_time = None;
-  let traversed = reader
-    .for_each_block_controlled(|time, handle, bytes, _| {
-      if callback_error.is_some() {
-        return ControlFlow::Break(());
+  let traversed = reader.for_each_block_controlled(|time, handle, bytes, _| {
+    if callback_error.is_some() {
+      return ControlFlow::Break(());
+    }
+    let result = (|| -> Result<bool> {
+      if last_time.is_some_and(|last| time < last) {
+        return Err("nonmonotonic callback timestamps".into());
       }
-      let result = (|| -> Result<bool, String> {
-        if last_time.is_some_and(|last| time < last) {
-          return Err("nonmonotonic callback timestamps".into());
-        }
-        if last_time != Some(time) {
-          if time >= options.start
-            && !emit_samples(time, false, &mut values, &observed, &mut report)?
-          {
-            return Ok(false);
-          }
-          last_time = Some(time);
-        }
-        // An enclosing block can deliver callbacks beyond the requested end.
-        // Every requested sample is now based on a complete preceding group.
-        if time > options.end {
-          return Ok(false);
-        }
-        report.decoded_callbacks += 1;
-        if options
-          .max_duration_ms
-          .is_some_and(|limit| timer.elapsed().as_millis() >= u128::from(limit))
+      if last_time != Some(time) {
+        if time >= options.start && !emit_samples(time, false, &mut values, &observed, &mut report)?
         {
-          report.stop_reason = Some("duration_budget".into());
           return Ok(false);
         }
-        let value = Cell::logic(bytes)?;
-        for &index in &mapping[&handle] {
-          values[index] = value.clone();
-          observed[index] = Some(time);
-        }
-        if options
-          .max_callbacks
-          .is_some_and(|limit| report.decoded_callbacks >= limit)
-        {
-          report.stop_reason = Some("callback_budget".into());
-          return Ok(false);
-        }
-        Ok(true)
-      })();
-      match result {
-        Ok(true) => ControlFlow::Continue(()),
-        Ok(false) => ControlFlow::Break(()),
-        Err(error) => {
-          callback_error = Some(error);
-          ControlFlow::Break(())
-        }
+        last_time = Some(time);
       }
-    })
-    .map_err(|e| e.to_string())?;
+      // An enclosing block can deliver callbacks beyond the requested end.
+      // Every requested sample is now based on a complete preceding group.
+      if time > options.end {
+        return Ok(false);
+      }
+      report.decoded_callbacks += 1;
+      if options
+        .max_duration_ms
+        .is_some_and(|limit| timer.elapsed().as_millis() >= u128::from(limit))
+      {
+        report.stop_reason = Some("duration_budget".into());
+        return Ok(false);
+      }
+      let value = Cell::logic(bytes)?;
+      for &index in &mapping[&handle] {
+        values[index] = value.clone();
+        observed[index] = Some(time);
+      }
+      if options
+        .max_callbacks
+        .is_some_and(|limit| report.decoded_callbacks >= limit)
+      {
+        report.stop_reason = Some("callback_budget".into());
+        return Ok(false);
+      }
+      Ok(true)
+    })();
+    match result {
+      Ok(true) => ControlFlow::Continue(()),
+      Ok(false) => ControlFlow::Break(()),
+      Err(error) => {
+        callback_error = Some(error);
+        ControlFlow::Break(())
+      }
+    }
+  })?;
   if let Some(error) = callback_error {
     return Err(error);
   }

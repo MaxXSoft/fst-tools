@@ -392,3 +392,16 @@ fn crossing_window_end_is_complete_before_a_later_work_budget_expiry() {
   assert_eq!(footer["last_callback_time"], "10");
   assert_eq!(footer["processed_through"], "9");
 }
+
+#[test]
+fn argument_diagnostics_respect_terminator_and_help() {
+  let output = Command::new(env!("CARGO_BIN_EXE_findfst"))
+    .args(["--", "--json"])
+    .output()
+    .unwrap();
+  assert_eq!(output.status.code(), Some(2));
+  assert!(String::from_utf8_lossy(&output.stderr).starts_with("error:"));
+  let output = invoke(Path::new("missing.fst"), &["1", "--json", "--help"]);
+  assert!(output.status.success());
+  assert!(output.stderr.is_empty());
+}

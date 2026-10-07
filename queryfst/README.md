@@ -79,7 +79,7 @@ uses `sqlparser`; execution is a small streaming Rust engine, not a database.
 SQL integers use checked signed 128-bit arithmetic. Known logic vectors are
 interpreted as unsigned values; signed RTL interpretation is not inferred.
 Integer division truncates toward zero. Arithmetic errors are explicit errors.
-Only fixed-width logic bindings are accepted in sampling mode. Raw event mode
+Only fixed-width logic bindings are accepted in sampling mode. Event-query mode
 also supports real, EVCD and variable-length values.
 
 Four-state values remain available as bit strings. Unknown numeric operands
@@ -170,7 +170,7 @@ sampling and scalar summaries reject recording interruptions inside the requeste
 window, including zero-duration off/on pairs. Unknown history is never silently
 converted to zero.
 
-`--summary` in raw mode accepts one-bit state signals, excluding VCD events.
+`--summary` in event-query mode accepts one-bit state signals, excluding VCD events.
 `residency_ticks` integrates `[start,end)` and sums to `end-start`; transitions
 include both endpoints. This is elapsed residency, not sampled cycle counting.
 A work-budget interruption omits these summaries rather than claiming a final

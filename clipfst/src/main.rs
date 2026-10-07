@@ -1,7 +1,7 @@
 mod hiers;
 mod vcd;
 
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, Parser, ValueEnum, error::ErrorKind};
 use fstapi::{Reader, Result, Writer, WriterPackType, writer_pack_type};
 use vcd::VcdWriter;
 
@@ -26,17 +26,17 @@ struct Cli {
   /// Output FST waveform file. Must be different from the input.
   output: String,
 
-  /// Start time of the clip, default to the beginning.
+  /// Inclusive start timestamp in raw FST ticks; defaults to the trace start.
   #[arg(short, long)]
   start: Option<u64>,
 
-  /// End time of the clip, default to the ending.
+  /// Inclusive end timestamp in raw FST ticks; defaults to the trace end.
   #[arg(short, long)]
   end: Option<u64>,
 
-  /// Keep matching signals only, support regex.
-  #[arg(short = 'S', long)]
-  signals: Option<String>,
+  /// Regular expression matching full hierarchical signal paths.
+  #[arg(short = 'S', long, value_name = "REGEX")]
+  signals: Option<regex::Regex>,
 
   /// Strip all attributes of the input waveform.
   #[arg(short = 't', long)]
@@ -113,18 +113,18 @@ fn try_main() -> Result<()> {
   // Parse command line arguments.
   let cli = Cli::parse();
 
-  // Validate command line arguments.
-  let signal_re = cli
-    .signals
-    .map(|s| try_or_exit!(regex::Regex::new(&s), e, "Invalid signal regex: {e}"));
-
   // Open the given FST file.
   let mut reader = Reader::open(&cli.input)?;
 
   // libfst unlinks an existing output before creating its writer. Reject
   // aliases of the input as well as identical path strings before that happens.
   match same_file::is_same_file(&cli.input, &cli.output) {
-    Ok(true) => eprintln_exit!("Input and output must be different files!"),
+    Ok(true) => Cli::command()
+      .error(
+        ErrorKind::ArgumentConflict,
+        "input and output must be different files",
+      )
+      .exit(),
     Ok(false) => {}
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
     Err(e) => eprintln_exit!("Failed to compare input and output files: {e}!"),
@@ -151,7 +151,7 @@ fn try_main() -> Result<()> {
     .parallel_mode(cli.parallel);
 
   // Build hierarchies for output FST file.
-  let selection = hiers::build(&mut reader, &mut writer, signal_re, cli.strip_attrs)?;
+  let selection = hiers::build(&mut reader, &mut writer, cli.signals, cli.strip_attrs)?;
 
   // Update signal masks for reader.
   if selection.handles.len() < (reader.var_count() - reader.alias_count()) as usize {
@@ -175,7 +175,12 @@ fn get_start_end(reader: &Reader, start: Option<u64>, end: Option<u64>) -> (u64,
     ($time:expr, $prompt:expr, $default:expr) => {
       if let Some(time) = $time {
         if time < reader.start_time() || time > reader.end_time() {
-          eprintln_exit!(concat!("Invalid ", $prompt, " time: {}!"), time);
+          Cli::command()
+            .error(
+              ErrorKind::ValueValidation,
+              format!(concat!("invalid ", $prompt, " time: {}"), time),
+            )
+            .exit();
         }
         time
       } else {
@@ -186,7 +191,12 @@ fn get_start_end(reader: &Reader, start: Option<u64>, end: Option<u64>) -> (u64,
   let start = get_time!(start, "start", reader.start_time());
   let end = get_time!(end, "end", reader.end_time());
   if start > end {
-    eprintln_exit!("Invalid time range: {start}-{end}!");
+    Cli::command()
+      .error(
+        ErrorKind::ValueValidation,
+        format!("invalid time range: {start}-{end}"),
+      )
+      .exit();
   }
   (start, end)
 }
