@@ -1,8 +1,9 @@
 //! Bounded request/response tracking for `timeouts(req, response, cycles [, key])`.
 //! Responses at the deadline sample satisfy the oldest outstanding request of
 //! the same key. Pending requests at EOF are unresolved, never counted as late.
-use super::Cell;
+
 use crate::error::{Error, Result};
+use crate::sql::Cell;
 use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Debug)]

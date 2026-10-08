@@ -1,10 +1,9 @@
 //! Timestamp-complete sampling and bounded traversal.
-use super::{
-  Cell, Column, Options, PeriodicSampling, Report, StopReason,
-  bindings::{self, ResolvedSignals},
-  plan::Plan,
-};
+
 use crate::error::{Error, Result};
+use crate::sql::bindings::{self, ResolvedSignals};
+use crate::sql::plan::Plan;
+use crate::sql::{Cell, Column, Options, PeriodicSampling, Report, StopReason};
 use fstapi::{Handle, Reader};
 use std::ops::ControlFlow;
 use std::time::Instant;

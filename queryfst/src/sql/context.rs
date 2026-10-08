@@ -1,6 +1,7 @@
 //! Coalesce sample windows around all, the first, or the last WHERE match.
-use super::{Cell, MatchMode};
+
 use crate::error::Result;
+use crate::sql::{Cell, MatchMode};
 use std::collections::VecDeque;
 
 pub(super) struct Context {

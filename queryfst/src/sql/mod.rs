@@ -1,4 +1,5 @@
 //! Finite SQL queries over explicitly sampled waveform state.
+
 mod bindings;
 mod context;
 mod deadline;
