@@ -1,4 +1,5 @@
 //! Resolve declarations once, with one state slot per SQL binding.
+
 use crate::error::Result;
 use fstapi::{Handle, Reader};
 use sqlparser::ast::{self, Expr, SelectItem, SetExpr, visit_expressions};

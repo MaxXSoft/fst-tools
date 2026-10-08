@@ -1,11 +1,12 @@
 //! Typed finite SQL planning, temporal expressions, and streaming reductions.
-use super::StopReason;
-use super::context::Context as MatchContext;
-use super::deadline::Deadline;
-use super::{Cell, Column, MatchMode, Options, Report};
+
 use crate::error::{Error, Result};
+use crate::sql::StopReason;
+use crate::sql::context::Context as MatchContext;
+use crate::sql::deadline::Deadline;
+use crate::sql::{Cell, Column, MatchMode, Options, Report};
 use sqlparser::ast::{
-  self as ast, BinaryOperator as B, Expr as A, FunctionArg, FunctionArgExpr, FunctionArguments,
+  self, BinaryOperator as B, Expr as A, FunctionArg, FunctionArgExpr, FunctionArguments,
   GroupByExpr, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator as U,
 };
 use sqlparser::dialect::GenericDialect;
@@ -216,7 +217,7 @@ fn binary(op: &B, left: Cell, right: Cell) -> Result<Cell> {
     B::BitwiseXor | B::PGBitwiseXor => Some(a ^ b),
     B::PGBitwiseShiftLeft if (0..128).contains(&b) => a.checked_shl(b as u32),
     B::PGBitwiseShiftRight if (0..128).contains(&b) => a.checked_shr(b as u32),
-    _ => return Err(format!("unsupported or invalid binary operator {op}").into()),
+    _ => return Err(format!("unsupported or invalid binary operation {a} {op} {b}").into()),
   }
   .ok_or("integer overflow or division by zero")?;
   Ok(Cell::Integer(value))
@@ -242,6 +243,7 @@ enum Aggregate {
   Max(Expr),
   SumBit(usize, u32),
 }
+
 impl Aggregate {
   fn update(&self, state: &mut Cell, ctx: &Context<'_>) -> Result<()> {
     match self {
@@ -302,6 +304,7 @@ impl Aggregate {
     }
     Ok(())
   }
+
   fn initial(&self) -> Cell {
     if matches!(self, Self::Count(_)) {
       Cell::Integer(0)
@@ -318,6 +321,7 @@ struct Temporal {
   run: u64,
   deadline: Option<Deadline>,
 }
+
 impl Temporal {
   fn advance(&mut self, args: Vec<Cell>) -> Result<Cell> {
     Ok(match self.name.as_str() {
@@ -376,6 +380,7 @@ fn key(expr: &A) -> String {
     _ => expr.to_string(),
   }
 }
+
 fn strip(expr: &A) -> &A {
   match expr {
     A::Nested(e) => strip(e),
@@ -715,15 +720,18 @@ struct Group {
   keys: Vec<Cell>,
   aggregates: Vec<Cell>,
 }
+
 struct Row {
   values: Vec<Cell>,
   order: Vec<Cell>,
 }
+
 struct Order {
   expression: OrderExpression,
   ascending: bool,
   nulls_first: bool,
 }
+
 enum OrderExpression {
   Projection(usize),
   Expression(Expr),
