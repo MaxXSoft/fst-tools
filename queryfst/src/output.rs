@@ -1,5 +1,5 @@
 //! Bounded whole-record output shared by raw and sampled queries.
-use crate::{Error, Format};
+use crate::{Error, Format, Result};
 use serde_json::{Value, json};
 use std::io::{self, Write};
 
@@ -14,7 +14,7 @@ pub struct Output<W> {
 }
 
 impl<W: Write> Output<W> {
-  pub fn new(writer: W, format: Format, max_bytes: Option<u64>) -> crate::Result<Self> {
+  pub fn new(writer: W, format: Format, max_bytes: Option<u64>) -> Result<Self> {
     if max_bytes.is_some_and(|n| n < 4096) {
       return Err(Error::Arguments(
         "--max-bytes must be at least 4096 (includes a reserved final summary)".into(),
@@ -29,7 +29,7 @@ impl<W: Write> Output<W> {
     })
   }
 
-  pub fn record(&mut self, value: &Value) -> crate::Result<bool> {
+  pub fn record(&mut self, value: &Value) -> Result<bool> {
     if self.truncated {
       return Ok(false);
     }
@@ -48,7 +48,7 @@ impl<W: Write> Output<W> {
     Ok(true)
   }
 
-  pub fn finish(&mut self, mut value: Value) -> crate::Result<()> {
+  pub fn finish(&mut self, mut value: Value) -> Result<()> {
     value["output_truncated"] =
       json!(self.truncated || value["output_truncated"].as_bool().unwrap_or(false));
     value["bytes_before_summary"] = self.bytes.to_string().into();
@@ -71,13 +71,13 @@ impl<W: Write> Output<W> {
     self.writer.flush().map_err(Error::Output)
   }
 
-  fn write(&mut self, bytes: &[u8]) -> crate::Result<()> {
+  fn write(&mut self, bytes: &[u8]) -> Result<()> {
     self.writer.write_all(bytes).map_err(Error::Output)?;
     self.bytes += bytes.len() as u64;
     Ok(())
   }
 
-  fn encode(&self, value: &Value) -> crate::Result<Vec<u8>> {
+  fn encode(&self, value: &Value) -> Result<Vec<u8>> {
     if self.format == Format::Json {
       let mut bytes = serde_json::to_vec(value)?;
       bytes.push(b'\n');

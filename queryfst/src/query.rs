@@ -148,11 +148,6 @@ impl State {
   }
 }
 
-/// Emits one complete JSON record per line and propagates output failures.
-fn line(output: &mut Output<impl Write>, record: &Value) -> Result<bool> {
-  output.record(record)
-}
-
 /// Selects handles first, then collects canonical paths and every alias.
 fn select(reader: &mut Reader, cli: &Cli) -> Result<Vec<Signal>> {
   let regex = cli.signals.as_ref();
@@ -246,15 +241,12 @@ fn initial(
       state.previous = None;
       state.source_time = None;
     }
-    line(
-      output,
-      &signal.record(
-        "initial",
-        start,
-        state.previous.as_deref(),
-        state.source_time,
-      )?,
-    )?;
+    output.record(&signal.record(
+      "initial",
+      start,
+      state.previous.as_deref(),
+      state.source_time,
+    )?)?;
   }
   Ok(())
 }
@@ -327,50 +319,42 @@ fn write_header(
     end,
     scan_start,
   } = window;
-  line(
-    output,
-    &json!({
-      "type": "header",
-      "schema": "queryfst",
-      "schema_version": 2,
-      "start": start.to_string(),
-      "end": end.to_string(),
-      "trace_start": reader.start_time().to_string(),
-      "trace_end": reader.end_time().to_string(),
-      "timescale_exponent": reader.timescale(),
-      "timezero": reader.timezero().to_string(),
-      "interval": "inclusive",
-      "initial_semantics": "latest_callback_strictly_before_start",
-      "event_order": "libfst_callback_order",
-      "limit": cli.max_rows.to_string(),
-      "mode": if cli.summary { "scalar_summary" } else { "events" },
-      "scan_start": scan_start.to_string(),
-      "early_termination": true,
-    }),
-  )?;
+  output.record(&json!({
+    "type": "header",
+    "schema": "queryfst",
+    "schema_version": 2,
+    "start": start.to_string(),
+    "end": end.to_string(),
+    "trace_start": reader.start_time().to_string(),
+    "trace_end": reader.end_time().to_string(),
+    "timescale_exponent": reader.timescale(),
+    "timezero": reader.timezero().to_string(),
+    "interval": "inclusive",
+    "initial_semantics": "latest_callback_strictly_before_start",
+    "event_order": "libfst_callback_order",
+    "limit": cli.max_rows.to_string(),
+    "mode": if cli.summary { "scalar_summary" } else { "events" },
+    "scan_start": scan_start.to_string(),
+    "early_termination": true,
+  }))?;
   for signal in signals {
-    line(
-      output,
-      &json!({
-        "type": "signal",
-        "handle": u32::from(signal.handle),
-        "path": signal.path,
-        "aliases": signal.aliases,
-        "width": signal.width,
-        "var_type": signal.ty,
-        "encoding": signal.encoding().as_str(),
-      }),
-    )?;
+    output.record(&json!({
+      "type": "signal",
+      "handle": u32::from(signal.handle),
+      "path": signal.path,
+      "aliases": signal.aliases,
+      "width": signal.width,
+      "var_type": signal.ty,
+      "encoding": signal.encoding().as_str(),
+    }))?;
   }
   for &(time, active) in &reader.dump_activity() {
-    line(
-      output,
-      &json!({"type": "dump_activity",
+    output.record(&json!({
+      "type": "dump_activity",
       "time": time.to_string(),
-      "active": active}),
-    )?;
+      "active": active,
+    }))?;
   }
-
   Ok(())
 }
 
@@ -461,7 +445,7 @@ fn scan(
         } else if emitted < cli.max_rows && !output.truncated {
           let mut record = signals[index].record("event", time, Some(value), None)?;
           record["sequence"] = emitted.to_string().into();
-          if line(output, &record)? {
+          if output.record(&record)? {
             emitted += 1;
           }
         }
@@ -497,24 +481,21 @@ fn scan(
       if summary_rows >= cli.max_rows {
         continue;
       }
-      if line(
-        output,
-        &json!({
-          "type": "scalar_summary",
-          "handle": u32::from(signal.handle),
-          "duration_ticks": (end - start).to_string(),
-          "residency_ticks": {
-            "0": zero,
-            "1": one,
-            "x": x,
-            "z": z,
-            "other": other,
-            "unavailable": unavailable,
-          },
-          "value_transitions": state.transitions.to_string(),
-          "callbacks": state.callbacks.to_string(),
-        }),
-      )? {
+      if output.record(&json!({
+        "type": "scalar_summary",
+        "handle": u32::from(signal.handle),
+        "duration_ticks": (end - start).to_string(),
+        "residency_ticks": {
+          "0": zero,
+          "1": one,
+          "x": x,
+          "z": z,
+          "other": other,
+          "unavailable": unavailable,
+        },
+        "value_transitions": state.transitions.to_string(),
+        "callbacks": state.callbacks.to_string(),
+      }))? {
         summary_rows += 1;
       }
     }
