@@ -149,9 +149,18 @@ fn hex(bytes: &[u8]) -> String {
   result
 }
 
+/// Normalize CLI presentation once before any callbacks are delivered.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+  Full,
+  Names,
+  Json,
+}
+
 /// Keep complete records and reserve space for a truthful final status.
 pub(crate) struct Output<'a, W> {
   writer: &'a mut W,
+  mode: Mode,
   cli: &'a Cli,
   catalog: &'a Catalog,
   written: u64,
@@ -170,8 +179,14 @@ impl<'a, W: Write> Output<'a, W> {
     start: u64,
     end: u64,
   ) -> Result<Self> {
+    let mode = match (cli.output_format(), cli.names_only) {
+      (Format::Json, _) => Mode::Json,
+      (_, true) => Mode::Names,
+      (_, false) => Mode::Full,
+    };
     let mut output = Self {
       writer,
+      mode,
       cli,
       catalog,
       written: 0,
@@ -180,7 +195,7 @@ impl<'a, W: Write> Output<'a, W> {
       omitted_metadata: 0,
       matches_blocked: false,
     };
-    if cli.output_format() != Format::Json {
+    if mode != Mode::Json {
       return Ok(output);
     }
     let header = json_line(&json!({
@@ -239,7 +254,7 @@ impl<'a, W: Write> Output<'a, W> {
   /// The footer reservation applies only when JSON has a stdout footer.
   fn fits(&self, bytes: u64) -> bool {
     self.cli.max_bytes.is_none_or(|limit| {
-      let reserve = if self.cli.output_format() == Format::Json {
+      let reserve = if self.mode == Mode::Json {
         FOOTER_RESERVE
       } else {
         0
@@ -291,7 +306,7 @@ impl<'a, W: Write> Output<'a, W> {
       self.omitted += 1;
       return Ok(());
     }
-    let bytes = if self.cli.output_format() == Format::Json {
+    let bytes = if self.mode == Mode::Json {
       let signal = &self.catalog.signals[&handle];
       let (encoding, value) = match signal.encoding() {
         Encoding::BytesHex => (Encoding::BytesHex, hex(value)),
@@ -317,7 +332,7 @@ impl<'a, W: Write> Output<'a, W> {
       }))?
     } else {
       let mut bytes = Vec::new();
-      if self.cli.names_only {
+      if self.mode == Mode::Names {
         NamePrinter.print(&mut bytes, time, name, value)?;
       } else {
         FullPrinter.print(&mut bytes, time, name, &self.matching_value(handle, value)?)?;
@@ -337,7 +352,7 @@ impl<'a, W: Write> Output<'a, W> {
   /// Exact totals are available only after traversal completes normally.
   pub(crate) fn finish(&mut self, scan: &Scan, selected: usize) -> Result<()> {
     let truncated = self.omitted != 0 || self.omitted_metadata != 0;
-    if self.cli.output_format() == Format::Text {
+    if self.mode != Mode::Json {
       if !scan.complete || truncated {
         eprintln!(
           concat!(
