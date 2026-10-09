@@ -261,3 +261,34 @@ queries exit successfully with explicit partial/truncated status.
 
 Run `cargo test -p queryfst` for generated waveform regressions. Large traces and
 experimental result tables remain outside the repository's tracked fixtures.
+
+## SQL microbenchmarks
+
+Run `cargo bench -p queryfst --bench sql_compile`. The stable Rust harness runs
+16 workloads in three phases: planning an existing AST, parsing plus planning,
+and planning plus execution over 256 synthetic samples. FST decoding, CLI startup,
+and output I/O are excluded. By default it uses nine serial rounds and at least
+30 ms per workload/phase; override these with `-- --rounds 5 --ms 50`.
+
+The runner checks result fingerprints (rows, column names, completion metadata)
+across all rounds and versions. JSON on stdout includes raw measurements, median,
+MAD, min/max, host OS/architecture, and executable paths/SHA-256 hashes. Progress
+goes to stderr. Keep saved executables and measurements under ignored `debug/`.
+
+To compare revisions, build each with
+`cargo bench -p queryfst --bench sql_compile --no-run --message-format=json` and
+copy the `compiler-artifact.executable` for the `sql_compile` target before
+changing revisions. Then run:
+
+```sh
+cargo bench -p queryfst --bench sql_compile -- \
+  --compare baseline="$PWD/debug/sql-base" --compare candidate="$PWD/debug/sql-new" \
+  > debug/sql-comparison.json
+```
+
+Pass absolute paths when invoking through Cargo, which runs the benchmark from
+the package directory. Executable and workload order rotate between rounds. Use the same host,
+toolchain, build profile, and workload definitions, and avoid concurrent builds
+or tests while timing. The optional `--legacy-compare LABEL=PATH` accepts saved
+release test executables from the former Python harness. The old ignored timing
+test remains available as a raw worker; normal `cargo test` does not time it.
