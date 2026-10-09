@@ -468,3 +468,47 @@ fn function_arity_and_context_errors_are_rejected_before_sampling() {
     );
   }
 }
+
+#[test]
+fn sort_direction_and_null_placement_are_independent() {
+  let dir = directory();
+  fixture(dir.path());
+  for (ordering, expected) in [
+    ("ASC NULLS FIRST", [2, 4, 0, 3, 1]),
+    ("ASC NULLS LAST", [4, 0, 3, 1, 2]),
+    ("DESC NULLS FIRST", [2, 3, 1, 4, 0]),
+    ("DESC NULLS LAST", [3, 1, 4, 0, 2]),
+  ] {
+    let sql = format!(
+      "SELECT tick, CASE WHEN tick=2 THEN NULL ELSE tick%2 END AS k
+       FROM samples ORDER BY k {ordering}, tick DESC"
+    );
+    let records = run(dir.path(), &sql, &[]);
+    let ticks: Vec<_> = rows(&records).iter().map(|row| row[0].clone()).collect();
+    assert_eq!(
+      ticks,
+      expected.map(|tick| json!(tick.to_string())),
+      "{ordering}"
+    );
+  }
+}
+
+#[test]
+fn final_output_truncation_preserves_the_sampling_stop_reason() {
+  let dir = directory();
+  fixture(dir.path());
+  for sql in [
+    "SELECT b, COUNT(*) FROM samples GROUP BY b",
+    "SELECT b, COUNT(*) FROM samples GROUP BY b ORDER BY 2 DESC",
+    "SELECT tick FROM samples ORDER BY b,tick",
+  ] {
+    let records = run(dir.path(), sql, &["--max-samples", "3", "--limit", "1"]);
+    assert_eq!(rows(&records).len(), 1, "{sql}");
+    let summary = records.last().unwrap();
+    assert_eq!(summary["complete"], false, "{sql}");
+    assert_eq!(summary["aggregate_final"], false, "{sql}");
+    assert_eq!(summary["reason"], "sample_budget", "{sql}");
+    assert_eq!(summary["output_reason"], "row_budget_exhausted", "{sql}");
+    assert_eq!(summary["output_truncated"], true, "{sql}");
+  }
+}
