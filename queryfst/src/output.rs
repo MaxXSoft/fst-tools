@@ -1,4 +1,5 @@
 //! Bounded whole-record output shared by raw and sampled queries.
+
 use crate::{Error, Format, Result};
 use serde_json::{Value, json};
 use std::io::{self, Write};
