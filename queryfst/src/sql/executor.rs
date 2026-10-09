@@ -3,7 +3,8 @@
 use crate::error::{Error, Result};
 use crate::sql::bindings::{self, ResolvedSignals};
 use crate::sql::plan::Plan;
-use crate::sql::{Cell, Column, Options, PeriodicSampling, Report, StopReason};
+use crate::sql::value::{Cell, Column};
+use crate::sql::{Options, PeriodicSampling, Report, StopReason};
 use fstapi::{Handle, Reader};
 use std::ops::ControlFlow;
 use std::time::Instant;

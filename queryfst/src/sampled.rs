@@ -1,4 +1,5 @@
 //! CLI options and result records for sampled SQL queries.
+use crate::sql::value::{Cell, Column};
 use crate::{Cli, Error, Matches, Result, output::Output, sql};
 use fstapi::Reader;
 use serde_json::json;
@@ -85,7 +86,7 @@ fn header(reader: &Reader, options: &sql::Options) -> serde_json::Value {
 fn write_header(
   output: &mut Output<impl Write>,
   header: &serde_json::Value,
-  columns: &[sql::Column],
+  columns: &[Column],
 ) -> Result<bool> {
   if !output.record(header)? {
     return Ok(false);
@@ -116,7 +117,7 @@ pub(crate) fn run(cli: Cli, output: &mut Output<impl Write>) -> Result<()> {
     }
     if !output.record(&json!({
       "type": "row",
-      "values": values.iter().map(sql::Cell::to_json).collect::<Vec<_>>(),
+      "values": values.iter().map(Cell::to_json).collect::<Vec<_>>(),
     }))? {
       return Ok(false);
     }
