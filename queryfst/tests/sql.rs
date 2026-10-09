@@ -512,3 +512,94 @@ fn final_output_truncation_preserves_the_sampling_stop_reason() {
     assert_eq!(summary["output_truncated"], true, "{sql}");
   }
 }
+
+#[test]
+fn normalized_group_expressions_preserve_labels_and_tree_structure() {
+  let dir = directory();
+  fixture(dir.path());
+  let records = run(
+    dir.path(),
+    "SELECT Is_KnOwN((a)), a + (b), COUNT(*) FROM samples
+     GROUP BY known(a), ((a) + b), is_known((a)) ORDER BY a + b DESC",
+    &[],
+  );
+  assert_eq!(
+    rows(&records),
+    vec![
+      json!(["1", "4", "2"]),
+      json!(["1", "2", "2"]),
+      json!(["1", "0", "1"])
+    ]
+  );
+  assert_eq!(
+    records
+      .iter()
+      .find(|record| record["type"] == "columns")
+      .unwrap()["columns"][0],
+    "Is_KnOwN((a))"
+  );
+  let invalid = invoke(
+    dir.path(),
+    "SELECT a - (b - a), COUNT(*) FROM samples GROUP BY (a - b) - a",
+    &[],
+  );
+  assert!(!invalid.status.success());
+  assert_eq!(
+    rows(&run(
+      dir.path(),
+      "SELECT SUM(a - (b - a)), SUM((a - b) - a) FROM samples",
+      &[]
+    )),
+    vec![json!(["18", "-2"])],
+  );
+}
+
+#[test]
+fn canonical_temporal_calls_share_history_and_deadline_statistics() {
+  let dir = directory();
+  fixture(dir.path());
+  let records = run(
+    dir.path(),
+    "SELECT lag((a)), LAG(a), LaG(lag((a))), lag(LAG(a)),
+       timeouts(tick=4,0,2), TIMEOUTS((tick)=4,(0),(2))
+     FROM samples WHERE tick IN (2,4)",
+    &[],
+  );
+  assert_eq!(
+    rows(&records),
+    vec![
+      json!(["1", "1", "0", "0", "0", "0"]),
+      json!(["3", "3", "2", "2", "0", "0"])
+    ]
+  );
+  assert_eq!(records.last().unwrap()["pending_requests"], "1");
+}
+
+#[test]
+fn normalization_preserves_order_syntax_and_rejects_function_modifiers() {
+  let dir = directory();
+  fixture(dir.path());
+  for (order, expected) in [("1", vec![4, 2, 3, 0, 1]), ("(1)", vec![0, 1, 2, 3, 4])] {
+    let sql = format!("SELECT a / 2, tick FROM samples ORDER BY {order} DESC, tick ASC");
+    let records = run(dir.path(), &sql, &[]);
+    assert_eq!(
+      rows(&records)
+        .iter()
+        .map(|row| row[1].clone())
+        .collect::<Vec<_>>(),
+      expected
+        .iter()
+        .map(|tick| json!(tick.to_string()))
+        .collect::<Vec<_>>()
+    );
+  }
+  for sql in [
+    "SELECT SUM(a), sum(DISTINCT (a)) FROM samples",
+    "SELECT SUM(a), sum((a)) FILTER (WHERE TRUE) FROM samples",
+    "SELECT SUM(a), sum((a)) OVER () FROM samples",
+    "SELECT lag(a), \"LAG\"((a)) FROM samples",
+    "SELECT a FROM samples LIMIT (1)",
+  ] {
+    assert!(!invoke(dir.path(), sql, &[]).status.success(), "{sql}");
+  }
+}

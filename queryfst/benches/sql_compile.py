@@ -8,8 +8,10 @@ Each executable must contain the same sql::bench::sql_compile_microbench test.
 """
 
 import argparse
+import hashlib
 import json
 import os
+import platform
 import random
 import statistics
 import subprocess
@@ -25,6 +27,11 @@ def main():
     if args.rounds < 1 or args.ms < 1:
         parser.error("rounds and ms must be positive")
     binaries = dict(item.split("=", 1) for item in args.binaries)
+    artifacts = {
+        label: {"path": str(Path(path).resolve()),
+                "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()}
+        for label, path in binaries.items()
+    }
     records = []
     fingerprints = {}
     rng = random.Random(20261009)
@@ -60,7 +67,9 @@ def main():
                             "median_ns": median,
                             "mad_ns": statistics.median(abs(v - median) for v in values),
                             "min_ns": min(values), "max_ns": max(values)})
-    print(json.dumps({"rounds": args.rounds, "ms": args.ms, "records": records, "summary": summary}, indent=2))
+    print(json.dumps({"platform": platform.platform(), "artifacts": artifacts,
+                      "rounds": args.rounds, "ms": args.ms,
+                      "records": records, "summary": summary}, indent=2))
 
 
 if __name__ == "__main__":

@@ -117,6 +117,12 @@ not replayed into those expressions.
 
 These functions advance once per sampled row **before WHERE**, including rows
 that the predicate rejects. Repeated uses of the same expression share its state.
+Expression identity ignores redundant parentheses, builtin function name case,
+and the `known`/`is_known` spelling difference. For example, `lag(a)` and
+`LAG((a))` share one history; equivalent `timeouts` calls also contribute their
+pending-request statistics only once. GROUP BY and ORDER BY expression matching
+use the same rules. Binding names, quoting, operand order and expression tree
+structure remain significant; displayed column names retain the original spelling.
 
 | Function | Meaning |
 | --- | --- |

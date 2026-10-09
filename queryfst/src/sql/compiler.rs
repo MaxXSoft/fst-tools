@@ -1,6 +1,7 @@
 //! Validation and lowering of SQL AST expressions into bound expressions.
 
 use crate::error::Result;
+use crate::sql::expr_index::ExprIndex;
 use crate::sql::ir::{Aggregate, Expr, ScalarFunction};
 use crate::sql::temporal::{Temporal, TemporalKind};
 use crate::sql::value::Cell;
@@ -8,7 +9,32 @@ use sqlparser::ast::{
   self, BinaryOperator as B, Expr as A, FunctionArg, FunctionArgExpr, FunctionArguments,
   UnaryOperator as U,
 };
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::hash::{BuildHasher, Hash, Hasher};
+
+/// Borrows a canonical call and hashes its AST once for lookup and insertion.
+/// Full AST equality still resolves hash collisions.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CallKey<'a> {
+  fingerprint: u64,
+  function: &'a ast::Function,
+}
+
+impl<'a> CallKey<'a> {
+  fn new(function: &'a ast::Function, hasher: &impl BuildHasher) -> Self {
+    Self {
+      function,
+      fingerprint: hasher.hash_one(function),
+    }
+  }
+}
+
+impl Hash for CallKey<'_> {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.fingerprint.hash(state);
+  }
+}
 
 /// Independent restrictions for aggregate calls and ungrouped column references.
 #[derive(Clone, Copy)]
@@ -55,20 +81,31 @@ impl AggregateFunction {
 }
 
 /// Resolves sample bindings and interns aggregate and temporal expressions.
-pub(super) struct Compiler<'a> {
+pub(super) struct Compiler<'a, 'ast> {
   schema: &'a HashMap<String, (usize, u32)>,
-  groups: Vec<String>,
+  groups: ExprIndex<'ast>,
   max_pending: usize,
   pub aggregates: Vec<Aggregate>,
-  aggregate_keys: HashMap<String, usize>,
+  aggregate_keys: HashMap<CallKey<'ast>, usize>,
   /// Dependency order: nested temporal inputs are registered before their users.
   pub temporal: Vec<Temporal>,
-  temporal_keys: HashMap<String, usize>,
+  temporal_keys: HashMap<CallKey<'ast>, usize>,
 }
 
-/// Textual GROUP BY identity, ignoring outer parentheses only.
-pub(super) fn key(expr: &A) -> String {
-  strip(expr).to_string()
+/// Normalized builtin names can be borrowed; raw AST grouping detection also
+/// calls this helper, so retain case folding and quoting for other spellings.
+fn function_name(function: &ast::Function) -> Cow<'_, str> {
+  if let [name] = function.name.0.as_slice()
+    && name.quote_style.is_none()
+  {
+    if name.value.bytes().any(|b| b.is_ascii_uppercase()) {
+      Cow::Owned(name.value.to_ascii_lowercase())
+    } else {
+      Cow::Borrowed(&name.value)
+    }
+  } else {
+    Cow::Owned(function.name.to_string().to_ascii_lowercase())
+  }
 }
 
 fn strip(expr: &A) -> &A {
@@ -78,15 +115,15 @@ fn strip(expr: &A) -> &A {
   }
 }
 
-impl<'a> Compiler<'a> {
+impl<'a, 'ast> Compiler<'a, 'ast> {
   pub(super) fn new(
     schema: &'a HashMap<String, (usize, u32)>,
-    groups: &[A],
+    groups: impl ExactSizeIterator<Item = &'ast A>,
     max_pending: usize,
   ) -> Self {
     Self {
       schema,
-      groups: groups.iter().map(key).collect(),
+      groups: ExprIndex::new(groups),
       max_pending,
       aggregates: vec![],
       aggregate_keys: HashMap::new(),
@@ -95,9 +132,9 @@ impl<'a> Compiler<'a> {
     }
   }
 
-  pub(super) fn compile(&mut self, expr: &A, ctx: CompileContext) -> Result<Expr> {
+  pub(super) fn compile(&mut self, expr: &'ast A, ctx: CompileContext) -> Result<Expr> {
     if ctx.grouped
-      && let Some(index) = self.groups.iter().position(|group| *group == key(expr))
+      && let Some(index) = self.groups.get(expr)
     {
       return Ok(Expr::Group(index));
     }
@@ -107,7 +144,13 @@ impl<'a> Compiler<'a> {
       A::CompoundIdentifier(parts)
         if parts.len() == 2 && parts[0].value.eq_ignore_ascii_case("samples") =>
       {
-        self.compile(&A::Identifier(parts[1].clone()), ctx)?
+        if ctx.grouped
+          && let Some(index) = self.groups.get(&A::Identifier(parts[1].clone()))
+        {
+          Expr::Group(index)
+        } else {
+          self.column(&parts[1], ctx)?
+        }
       }
       A::Value(value) => Expr::Const(literal(value)?),
       A::UnaryOp { op, expr } => self.unary(op, expr, ctx)?,
@@ -165,14 +208,14 @@ impl<'a> Compiler<'a> {
     ))
   }
 
-  fn unary(&mut self, op: &U, expr: &A, ctx: CompileContext) -> Result<Expr> {
+  fn unary(&mut self, op: &U, expr: &'ast A, ctx: CompileContext) -> Result<Expr> {
     if !matches!(op, U::Not | U::Plus | U::Minus | U::PGBitwiseNot) {
       return Err(format!("unsupported unary operator {op}").into());
     }
     Ok(Expr::Unary(*op, Box::new(self.compile(expr, ctx)?)))
   }
 
-  fn binary(&mut self, left: &A, op: &B, right: &A, ctx: CompileContext) -> Result<Expr> {
+  fn binary(&mut self, left: &'ast A, op: &B, right: &'ast A, ctx: CompileContext) -> Result<Expr> {
     if !matches!(
       op,
       B::Plus
@@ -210,9 +253,9 @@ impl<'a> Compiler<'a> {
 
   fn between(
     &mut self,
-    expr: &A,
-    low: &A,
-    high: &A,
+    expr: &'ast A,
+    low: &'ast A,
+    high: &'ast A,
     negated: bool,
     ctx: CompileContext,
   ) -> Result<Expr> {
@@ -233,7 +276,13 @@ impl<'a> Compiler<'a> {
     Ok(negate(test, negated))
   }
 
-  fn in_list(&mut self, expr: &A, list: &[A], negated: bool, ctx: CompileContext) -> Result<Expr> {
+  fn in_list(
+    &mut self,
+    expr: &'ast A,
+    list: &'ast [A],
+    negated: bool,
+    ctx: CompileContext,
+  ) -> Result<Expr> {
     let value = self.compile(expr, ctx)?;
     let mut test = Expr::Const(Cell::Bool(false));
     for item in list {
@@ -252,10 +301,10 @@ impl<'a> Compiler<'a> {
 
   fn case(
     &mut self,
-    operand: Option<&A>,
-    conditions: &[A],
-    results: &[A],
-    otherwise: Option<&A>,
+    operand: Option<&'ast A>,
+    conditions: &'ast [A],
+    results: &'ast [A],
+    otherwise: Option<&'ast A>,
     ctx: CompileContext,
   ) -> Result<Expr> {
     Ok(Expr::Case(
@@ -276,9 +325,9 @@ impl<'a> Compiler<'a> {
     ))
   }
 
-  fn function(&mut self, function: &ast::Function, ctx: CompileContext) -> Result<Expr> {
+  fn function(&mut self, function: &'ast ast::Function, ctx: CompileContext) -> Result<Expr> {
     let args = function_arguments(function)?;
-    let name = function.name.to_string().to_ascii_lowercase();
+    let name = function_name(function);
     if let Some(kind) = AggregateFunction::parse(&name) {
       return self.aggregate(function, &name, kind, &args, ctx);
     }
@@ -300,16 +349,16 @@ impl<'a> Compiler<'a> {
     Ok(Expr::Function(kind, self.arguments(&args, ctx)?))
   }
 
-  fn arguments(&mut self, args: &[&A], ctx: CompileContext) -> Result<Vec<Expr>> {
+  fn arguments(&mut self, args: &[&'ast A], ctx: CompileContext) -> Result<Vec<Expr>> {
     args.iter().map(|arg| self.compile(arg, ctx)).collect()
   }
 
   fn aggregate(
     &mut self,
-    function: &ast::Function,
+    function: &'ast ast::Function,
     name: &str,
     kind: AggregateFunction,
-    args: &[Option<&A>],
+    args: &[Option<&'ast A>],
     ctx: CompileContext,
   ) -> Result<Expr> {
     if !ctx.allow_aggregates {
@@ -320,7 +369,7 @@ impl<'a> Compiler<'a> {
     if args.len() != 1 {
       return Err(format!("{name} requires one argument").into());
     }
-    let key = function.to_string();
+    let key = CallKey::new(function, self.aggregate_keys.hasher());
     if let Some(index) = self.aggregate_keys.get(&key) {
       return Ok(Expr::Aggregate(*index));
     }
@@ -341,10 +390,10 @@ impl<'a> Compiler<'a> {
 
   fn temporal(
     &mut self,
-    function: &ast::Function,
+    function: &'ast ast::Function,
     name: &str,
     kind: TemporalKind,
-    args: &[&A],
+    args: &[&'ast A],
     ctx: CompileContext,
   ) -> Result<Expr> {
     if ctx.grouped {
@@ -354,8 +403,8 @@ impl<'a> Compiler<'a> {
     if args.len() != arity {
       return Err(format!("{name} requires {arity} arguments").into());
     }
-    // Preserve textual call identity when sharing history across clauses.
-    let key = function.to_string();
+    // Share canonical calls across clauses, checking full AST equality after hashing.
+    let key = CallKey::new(function, self.temporal_keys.hasher());
     if let Some(index) = self.temporal_keys.get(&key) {
       return Ok(Expr::Temporal(*index));
     }
@@ -372,7 +421,7 @@ impl<'a> Compiler<'a> {
     Ok(Expr::Temporal(index))
   }
 
-  fn raw(&mut self, args: &[&A], ctx: CompileContext) -> Result<Expr> {
+  fn raw(&mut self, args: &[&'ast A], ctx: CompileContext) -> Result<Expr> {
     if args.len() != 1 {
       return Err("raw requires one argument".into());
     }
@@ -457,11 +506,7 @@ fn sum(value: Expr) -> Aggregate {
 pub(super) fn has_aggregate(expr: &A) -> bool {
   // Used only to choose grouping context; the compiler then checks every AST node.
   match expr {
-    A::Function(f)
-      if AggregateFunction::parse(&f.name.to_string().to_ascii_lowercase()).is_some() =>
-    {
-      true
-    }
+    A::Function(f) if AggregateFunction::parse(&function_name(f)).is_some() => true,
     A::Nested(e)
     | A::UnaryOp { expr: e, .. }
     | A::IsNull(e)
@@ -496,5 +541,79 @@ pub(super) fn has_aggregate(expr: &A) -> bool {
       }
     }
     _ => false,
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::sql::normalize::normalize;
+  use crate::sql::plan::Plan;
+
+  fn expressions(sql: &str) -> Vec<A> {
+    let query = Plan::parse(sql).unwrap();
+    let ast::SetExpr::Select(select) = *query.body else {
+      panic!()
+    };
+    let mut expressions = select
+      .projection
+      .into_iter()
+      .map(|item| {
+        let ast::SelectItem::UnnamedExpr(expr) = item else {
+          panic!()
+        };
+        expr
+      })
+      .collect::<Vec<_>>();
+    normalize(&mut expressions);
+    expressions
+  }
+
+  #[test]
+  fn canonical_calls_share_slots_without_bypassing_context_checks() {
+    let expressions = expressions(
+      "SELECT SUM(known(a)), sum(is_known((a))),
+      LAG(a), lag((a)), lag(LAG((a))), LaG(lag(a)) FROM samples",
+    );
+    let schema = HashMap::from([("a".into(), (0, 8))]);
+    let mut compiler = Compiler::new(&schema, std::iter::empty(), 10);
+    for expr in &expressions {
+      compiler
+        .compile(expr, CompileContext::projection(false))
+        .unwrap();
+    }
+    assert_eq!(compiler.aggregates.len(), 1);
+    assert_eq!(compiler.temporal.len(), 2);
+    assert!(
+      compiler
+        .compile(&expressions[1], CompileContext::SAMPLE)
+        .is_err()
+    );
+    assert!(
+      compiler
+        .compile(&expressions[3], CompileContext::projection(true))
+        .is_err()
+    );
+  }
+
+  #[test]
+  fn hash_collisions_do_not_merge_distinct_calls() {
+    let expressions = expressions("SELECT SUM(a), SUM(a + 1) FROM samples");
+    let calls = expressions
+      .iter()
+      .map(|expr| {
+        let A::Function(function) = expr else {
+          panic!()
+        };
+        CallKey {
+          function,
+          fingerprint: 0,
+        }
+      })
+      .collect::<Vec<_>>();
+    let indices = HashMap::from([(calls[0], 0), (calls[1], 1)]);
+    assert_eq!(indices.len(), 2);
+    assert_eq!(indices.get(&calls[0]), Some(&0));
+    assert_eq!(indices.get(&calls[1]), Some(&1));
   }
 }
