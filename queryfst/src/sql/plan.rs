@@ -1,15 +1,18 @@
 //! Query planning and streaming execution of bound SQL expressions.
 
 use crate::error::{Error, Result};
-use crate::sql::compiler::{CompileContext, Compiler, has_aggregate, key};
+use crate::sql::compiler::{CompileContext, Compiler, has_aggregate};
 use crate::sql::context::Context as MatchContext;
+use crate::sql::expr_index::ExprIndex;
 use crate::sql::ir::{Aggregate, EvalContext, Expr, Order, OrderExpression};
+use crate::sql::normalize::normalized;
 use crate::sql::temporal::Temporal;
 use crate::sql::value::{Cell, Column};
 use crate::sql::{MatchMode, Options, Report, StopReason};
 use sqlparser::ast::{self, Expr as A, GroupByExpr, SelectItem, SetExpr, Statement, TableFactor};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 
@@ -72,17 +75,25 @@ impl Plan {
     options: &Options,
   ) -> Result<Self> {
     let select = validate_query(query)?;
-    let group_ast = group_expressions(select)?;
+    let group_ast = group_expressions(select)?
+      .iter()
+      .map(normalized)
+      .collect::<Vec<_>>();
     let (projection_ast, mut columns) = collect_projection(select)?;
     let aggregate = !group_ast.is_empty()
-      || projection_ast.iter().any(has_aggregate)
+      || projection_ast.iter().any(|expr| has_aggregate(expr))
       || query
         .order_by
         .as_ref()
         .is_some_and(|o| o.exprs.iter().any(|e| has_aggregate(&e.expr)));
-    let mut compiler = Compiler::new(schema, group_ast, options.max_buffer_rows.unwrap_or(100000));
-    let selection = select
-      .selection
+    let order_ast = query.order_by.as_ref().map(normalized);
+    let mut compiler = Compiler::new(
+      schema,
+      group_ast.iter().map(|e| &**e),
+      options.max_buffer_rows.unwrap_or(100000),
+    );
+    let selection_ast = select.selection.as_ref().map(normalized);
+    let selection = selection_ast
       .as_ref()
       .map(|expr| compiler.compile(expr, CompileContext::SAMPLE))
       .transpose()?;
@@ -96,6 +107,7 @@ impl Plan {
       .collect::<Result<Vec<_>>>()?;
     let order = compile_order(
       query.order_by.as_ref(),
+      order_ast.as_deref(),
       &mut compiler,
       &projection_ast,
       &columns,
@@ -525,7 +537,7 @@ fn group_expressions(select: &ast::Select) -> Result<&[A]> {
   Ok(group_ast)
 }
 
-fn collect_projection(select: &ast::Select) -> Result<(Vec<A>, Vec<Column>)> {
+fn collect_projection(select: &ast::Select) -> Result<(Vec<Cow<'_, A>>, Vec<Column>)> {
   let mut projection_ast = Vec::new();
   let mut columns = Vec::new();
   for item in &select.projection {
@@ -534,13 +546,13 @@ fn collect_projection(select: &ast::Select) -> Result<(Vec<A>, Vec<Column>)> {
         columns.push(Column {
           name: expr.to_string(),
         });
-        projection_ast.push(expr.clone());
+        projection_ast.push(normalized(expr));
       }
       SelectItem::ExprWithAlias { expr, alias } => {
         columns.push(Column {
           name: alias.value.clone(),
         });
-        projection_ast.push(expr.clone());
+        projection_ast.push(normalized(expr));
       }
       _ => return Err("SELECT * is unsupported; select named bindings explicitly".into()),
     }
@@ -551,10 +563,11 @@ fn collect_projection(select: &ast::Select) -> Result<(Vec<A>, Vec<Column>)> {
   Ok((projection_ast, columns))
 }
 
-fn compile_order(
-  order_by: Option<&ast::OrderBy>,
-  compiler: &mut Compiler<'_>,
-  projection_ast: &[A],
+fn compile_order<'ast>(
+  original_order: Option<&ast::OrderBy>,
+  order_by: Option<&'ast ast::OrderBy>,
+  compiler: &mut Compiler<'_, 'ast>,
+  projection_ast: &'ast [Cow<'_, A>],
   columns: &[Column],
   aggregate: bool,
 ) -> Result<Vec<Order>> {
@@ -563,11 +576,18 @@ fn compile_order(
     if order_by.interpolate.is_some() {
       return Err("ORDER BY INTERPOLATE is unsupported".into());
     }
-    for item in &order_by.exprs {
+    let mut projection_indices = None;
+    for (original, item) in original_order.unwrap().exprs.iter().zip(&order_by.exprs) {
       if item.with_fill.is_some() {
         return Err("ORDER BY WITH FILL is unsupported".into());
       }
-      let projected = projected_order_index(&item.expr, projection_ast, columns)?;
+      let projected = projected_order_index(
+        &original.expr,
+        &item.expr,
+        projection_ast,
+        &mut projection_indices,
+        columns,
+      )?;
       let expression = match projected {
         Some(i) => OrderExpression::Projection(i),
         None => OrderExpression::Expression(
@@ -585,9 +605,11 @@ fn compile_order(
 }
 
 /// Resolves output aliases and ordinals before falling back to input expressions.
-fn projected_order_index(
+fn projected_order_index<'ast>(
   expr: &A,
-  projection_ast: &[A],
+  normalized_expr: &A,
+  projection_ast: &'ast [Cow<'_, A>],
+  projection_indices: &mut Option<ExprIndex<'ast>>,
   columns: &[Column],
 ) -> Result<Option<usize>> {
   Ok(match expr {
@@ -600,9 +622,9 @@ fn projected_order_index(
         .filter(|v| *v < columns.len())
         .ok_or("ORDER BY ordinal is outside the SELECT projection")?,
     ),
-    _ => projection_ast
-      .iter()
-      .position(|projected| key(projected) == key(expr)),
+    _ => projection_indices
+      .get_or_insert_with(|| ExprIndex::new(projection_ast.iter().map(|expr| &**expr)))
+      .get(normalized_expr),
   })
 }
 
