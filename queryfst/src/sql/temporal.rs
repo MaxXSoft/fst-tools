@@ -12,6 +12,31 @@ pub(super) struct Temporal {
   args: Vec<Expr>,
 }
 
+impl Temporal {
+  /// Inputs have compiler-validated arity and contain no aggregate references.
+  pub(super) fn new(kind: TemporalKind, args: Vec<Expr>) -> Self {
+    Self { kind, args }
+  }
+
+  /// Advances once per sampled row, after dependencies and before WHERE.
+  pub(super) fn advance(&mut self, ctx: &EvalContext<'_>) -> Result<Cell> {
+    let args = self
+      .args
+      .iter()
+      .map(|expr| expr.eval(ctx))
+      .collect::<Result<Vec<_>>>()?;
+    self.kind.advance(&args)
+  }
+
+  /// Exposes timeout statistics without making the other state variants public.
+  pub(super) fn deadline(&self) -> Option<&Deadline> {
+    match &self.kind {
+      TemporalKind::Timeouts(deadline) => Some(deadline),
+      _ => None,
+    }
+  }
+}
+
 /// Each temporal operation owns only the history required by that operation.
 pub(super) enum TemporalKind {
   /// Bounded request/response tracker, initially empty.
@@ -75,31 +100,6 @@ impl TemporalKind {
         .map(|length| Cell::Bool(length == 1))
         .unwrap_or(Cell::Null),
     })
-  }
-}
-
-impl Temporal {
-  /// Inputs have compiler-validated arity and contain no aggregate references.
-  pub(super) fn new(kind: TemporalKind, args: Vec<Expr>) -> Self {
-    Self { kind, args }
-  }
-
-  /// Advances once per sampled row, after dependencies and before WHERE.
-  pub(super) fn advance(&mut self, ctx: &EvalContext<'_>) -> Result<Cell> {
-    let args = self
-      .args
-      .iter()
-      .map(|expr| expr.eval(ctx))
-      .collect::<Result<Vec<_>>>()?;
-    self.kind.advance(&args)
-  }
-
-  /// Exposes timeout statistics without making the other state variants public.
-  pub(super) fn deadline(&self) -> Option<&Deadline> {
-    match &self.kind {
-      TemporalKind::Timeouts(deadline) => Some(deadline),
-      _ => None,
-    }
   }
 }
 

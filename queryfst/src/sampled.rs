@@ -1,4 +1,5 @@
 //! CLI options and result records for sampled SQL queries.
+
 use crate::sql::value::{Cell, Column};
 use crate::{Cli, Error, Matches, Result, output::Output, sql};
 use fstapi::Reader;
