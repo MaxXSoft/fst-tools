@@ -383,3 +383,56 @@ pub(super) enum OrderExpression {
   /// Additional expression evaluated in the same context as the projection.
   Expression(Expr),
 }
+
+impl<'a> EvalContext<'a> {
+  /// Sample-phase expressions can read bindings and temporal results only.
+  pub(super) fn sample(cells: &'a [Cell], temporal: &'a [Cell]) -> Self {
+    Self {
+      cells,
+      temporal,
+      groups: &[],
+      aggregates: &[],
+    }
+  }
+
+  pub(super) fn evaluate(&self, expressions: &[Expr]) -> Result<Vec<Cell>> {
+    expressions.iter().map(|expr| expr.eval(self)).collect()
+  }
+}
+
+impl Order {
+  pub(super) fn eval(&self, projection: &[Cell], ctx: &EvalContext<'_>) -> Result<Cell> {
+    match &self.expression {
+      OrderExpression::Projection(i) => projection[*i].clone().normalized(),
+      OrderExpression::Expression(expr) => expr.eval(ctx)?.normalized(),
+    }
+  }
+
+  /// Compares normalized keys; reversing direction never reverses NULL placement.
+  pub(super) fn compare(&self, left: &Cell, right: &Cell) -> Ordering {
+    match (matches!(left, Cell::Null), matches!(right, Cell::Null)) {
+      (true, true) => Ordering::Equal,
+      (true, false) => {
+        if self.nulls_first {
+          Ordering::Less
+        } else {
+          Ordering::Greater
+        }
+      }
+      (false, true) => {
+        if self.nulls_first {
+          Ordering::Greater
+        } else {
+          Ordering::Less
+        }
+      }
+      (false, false) => {
+        if self.ascending {
+          left.cmp(right)
+        } else {
+          right.cmp(left)
+        }
+      }
+    }
+  }
+}
