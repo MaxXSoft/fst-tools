@@ -5,6 +5,35 @@ use crate::sql::value::Cell;
 use sqlparser::ast::{BinaryOperator as B, UnaryOperator as U};
 use std::cmp::Ordering;
 
+/// Borrowed inputs for one sample or one finalized group.
+/// The compiler ensures expressions only address slices available in that phase.
+pub(super) struct EvalContext<'a> {
+  /// Current sampled values; empty while finalizing groups.
+  pub cells: &'a [Cell],
+  /// Results of temporal nodes already advanced for this sample.
+  pub temporal: &'a [Cell],
+  /// Normalized keys for the group being finalized; empty during sampling.
+  pub groups: &'a [Cell],
+  /// Reduction results for that group; empty during sampling.
+  pub aggregates: &'a [Cell],
+}
+
+impl<'a> EvalContext<'a> {
+  /// Sample-phase expressions can read bindings and temporal results only.
+  pub(super) fn sample(cells: &'a [Cell], temporal: &'a [Cell]) -> Self {
+    Self {
+      cells,
+      temporal,
+      groups: &[],
+      aggregates: &[],
+    }
+  }
+
+  pub(super) fn evaluate(&self, expressions: &[Expr]) -> Result<Vec<Cell>> {
+    expressions.iter().map(|expr| expr.eval(self)).collect()
+  }
+}
+
 /// Bound expression; indices address the corresponding EvalContext slices.
 /// Temporal and aggregate references read values computed by the plan.
 #[derive(Clone, Debug)]
@@ -34,17 +63,180 @@ pub(super) enum Expr {
   Raw(Box<Self>, Option<u32>),
 }
 
-/// Borrowed inputs for one sample or one finalized group.
-/// The compiler ensures expressions only address slices available in that phase.
-pub(super) struct EvalContext<'a> {
-  /// Current sampled values; empty while finalizing groups.
-  pub cells: &'a [Cell],
-  /// Results of temporal nodes already advanced for this sample.
-  pub temporal: &'a [Cell],
-  /// Normalized keys for the group being finalized; empty during sampling.
-  pub groups: &'a [Cell],
-  /// Reduction results for that group; empty during sampling.
-  pub aggregates: &'a [Cell],
+impl Expr {
+  pub(super) fn eval(&self, ctx: &EvalContext<'_>) -> Result<Cell> {
+    Ok(match self {
+      Self::Const(v) => v.clone(),
+      Self::Column(i) => ctx.cells[*i].clone(),
+      Self::Group(i) => ctx.groups[*i].clone(),
+      Self::Aggregate(i) => ctx.aggregates[*i].clone(),
+      Self::Temporal(i) => ctx.temporal[*i].clone(),
+      Self::Unary(op, expr) => eval_unary(op, expr.eval(ctx)?)?,
+      Self::Binary(op, left, right) => eval_binary(op, left.eval(ctx)?, right.eval(ctx)?)?,
+      Self::TruthTest(expr, expected, negated) => {
+        Cell::Bool((expr.eval(ctx)?.truth()? == Some(*expected)) != *negated)
+      }
+      Self::NullTest(expr, negated) => {
+        Cell::Bool(matches!(expr.eval(ctx)?, Cell::Null) != *negated)
+      }
+      Self::Distinct(a, b, negated) => {
+        Cell::Bool((a.eval(ctx)?.normalized()? != b.eval(ctx)?.normalized()?) != *negated)
+      }
+      Self::Case(operand, clauses, otherwise) => {
+        eval_case(operand.as_deref(), clauses, otherwise, ctx)?
+      }
+      Self::Raw(expr, width) => eval_raw(expr.eval(ctx)?, *width),
+      Self::Function(function, args) => function.eval(args, ctx)?,
+    })
+  }
+}
+
+fn eval_unary(op: &U, value: Cell) -> Result<Cell> {
+  Ok(match op {
+    U::Not => value.truth()?.map(|v| Cell::Bool(!v)).unwrap_or(Cell::Null),
+    U::Plus => value.integer()?.map(Cell::Integer).unwrap_or(Cell::Null),
+    U::Minus => match value.integer()? {
+      Some(v) => Cell::Integer(v.checked_neg().ok_or("integer overflow")?),
+      None => Cell::Null,
+    },
+    U::PGBitwiseNot => value
+      .integer()?
+      .map(|v| Cell::Integer(!v))
+      .unwrap_or(Cell::Null),
+    _ => return Err(format!("unsupported unary operator {op}").into()),
+  })
+}
+
+/// Implements checked integer operations and SQL three-valued predicates.
+fn eval_binary(op: &B, left: Cell, right: Cell) -> Result<Cell> {
+  if matches!(op, B::And | B::Or | B::Xor) {
+    let (a, b) = (left.truth()?, right.truth()?);
+    return Ok(match op {
+      B::And => {
+        if a == Some(false) || b == Some(false) {
+          Cell::Bool(false)
+        } else if a == Some(true) && b == Some(true) {
+          Cell::Bool(true)
+        } else {
+          Cell::Null
+        }
+      }
+      B::Or => {
+        if a == Some(true) || b == Some(true) {
+          Cell::Bool(true)
+        } else if a == Some(false) && b == Some(false) {
+          Cell::Bool(false)
+        } else {
+          Cell::Null
+        }
+      }
+      _ => a
+        .zip(b)
+        .map(|(a, b)| Cell::Bool(a ^ b))
+        .unwrap_or(Cell::Null),
+    });
+  }
+  if matches!(left, Cell::Null) || matches!(right, Cell::Null) {
+    return Ok(Cell::Null);
+  }
+  if let (Cell::Text(a), Cell::Text(b)) = (&left, &right) {
+    if matches!(op, B::StringConcat) {
+      return Ok(Cell::Text(format!("{a}{b}")));
+    }
+    return eval_comparison(op, a.cmp(b)).map(Cell::Bool);
+  }
+  let (Some(a), Some(b)) = (left.integer()?, right.integer()?) else {
+    return Ok(Cell::Null);
+  };
+  if matches!(op, B::Eq | B::NotEq | B::Gt | B::GtEq | B::Lt | B::LtEq) {
+    return eval_comparison(op, a.cmp(&b)).map(Cell::Bool);
+  }
+  let value = match op {
+    B::Plus => a.checked_add(b),
+    B::Minus => a.checked_sub(b),
+    B::Multiply => a.checked_mul(b),
+    B::Divide | B::DuckIntegerDivide | B::MyIntegerDivide => a.checked_div(b),
+    B::Modulo => a.checked_rem(b),
+    B::BitwiseAnd => Some(a & b),
+    B::BitwiseOr => Some(a | b),
+    B::BitwiseXor | B::PGBitwiseXor => Some(a ^ b),
+    B::PGBitwiseShiftLeft if (0..128).contains(&b) => a.checked_shl(b as u32),
+    B::PGBitwiseShiftRight if (0..128).contains(&b) => a.checked_shr(b as u32),
+    _ => return Err(format!("unsupported or invalid binary operation {a} {op} {b}").into()),
+  }
+  .ok_or("integer overflow or division by zero")?;
+  Ok(Cell::Integer(value))
+}
+
+fn eval_comparison(op: &B, order: Ordering) -> Result<bool> {
+  Ok(match op {
+    B::Eq => order == Ordering::Equal,
+    B::NotEq => order != Ordering::Equal,
+    B::Gt => order == Ordering::Greater,
+    B::GtEq => order != Ordering::Less,
+    B::Lt => order == Ordering::Less,
+    B::LtEq => order != Ordering::Greater,
+    _ => return Err(format!("invalid comparison {op}").into()),
+  })
+}
+
+/// Evaluates conditions in order and only evaluates the selected result branch.
+fn eval_case(
+  operand: Option<&Expr>,
+  clauses: &[(Expr, Expr)],
+  otherwise: &Expr,
+  ctx: &EvalContext<'_>,
+) -> Result<Cell> {
+  let operand = operand.map(|expr| expr.eval(ctx)).transpose()?;
+  for (condition, value) in clauses {
+    let condition = condition.eval(ctx)?;
+    let yes = if let Some(operand) = &operand {
+      eval_binary(&B::Eq, operand.clone(), condition)?.truth()?
+    } else {
+      condition.truth()?
+    };
+    if yes == Some(true) {
+      return value.eval(ctx);
+    }
+  }
+  otherwise.eval(ctx)
+}
+
+fn eval_raw(value: Cell, width: Option<u32>) -> Cell {
+  match value {
+    Cell::Bits(bits) => Cell::Text(bits),
+    Cell::Integer(v) => Cell::Text(if let Some(width) = width {
+      format!("{v:0width$b}", width = width as usize)
+    } else {
+      format!("{v:b}")
+    }),
+    value => value,
+  }
+}
+
+fn eval_bit(value: &Cell, index: &Cell) -> Result<Cell> {
+  Ok(match index.integer()? {
+    Some(bit) if (0..128).contains(&bit) => match value {
+      Cell::Bits(bits) => bits
+        .as_bytes()
+        .iter()
+        .rev()
+        .nth(bit as usize)
+        .and_then(|b| match b {
+          b'0' => Some(0),
+          b'1' => Some(1),
+          _ => None,
+        })
+        .map(Cell::Integer)
+        .unwrap_or(Cell::Null),
+      value => value
+        .integer()?
+        .map(|v| Cell::Integer((v >> bit) & 1))
+        .unwrap_or(Cell::Null),
+    },
+    None => Cell::Null,
+    _ => return Err("bit index must be 0..127".into()),
+  })
 }
 
 /// Supported scalar functions, resolved from names and aliases during compilation.
@@ -108,182 +300,6 @@ impl ScalarFunction {
         .unwrap_or(Cell::Null),
     })
   }
-}
-
-impl Expr {
-  pub(super) fn eval(&self, ctx: &EvalContext<'_>) -> Result<Cell> {
-    Ok(match self {
-      Self::Const(v) => v.clone(),
-      Self::Column(i) => ctx.cells[*i].clone(),
-      Self::Group(i) => ctx.groups[*i].clone(),
-      Self::Aggregate(i) => ctx.aggregates[*i].clone(),
-      Self::Temporal(i) => ctx.temporal[*i].clone(),
-      Self::Unary(op, expr) => eval_unary(op, expr.eval(ctx)?)?,
-      Self::Binary(op, left, right) => binary(op, left.eval(ctx)?, right.eval(ctx)?)?,
-      Self::TruthTest(expr, expected, negated) => {
-        Cell::Bool((expr.eval(ctx)?.truth()? == Some(*expected)) != *negated)
-      }
-      Self::NullTest(expr, negated) => {
-        Cell::Bool(matches!(expr.eval(ctx)?, Cell::Null) != *negated)
-      }
-      Self::Distinct(a, b, negated) => {
-        Cell::Bool((a.eval(ctx)?.normalized()? != b.eval(ctx)?.normalized()?) != *negated)
-      }
-      Self::Case(operand, clauses, otherwise) => {
-        eval_case(operand.as_deref(), clauses, otherwise, ctx)?
-      }
-      Self::Raw(expr, width) => eval_raw(expr.eval(ctx)?, *width),
-      Self::Function(function, args) => function.eval(args, ctx)?,
-    })
-  }
-}
-
-fn eval_unary(op: &U, value: Cell) -> Result<Cell> {
-  Ok(match op {
-    U::Not => value.truth()?.map(|v| Cell::Bool(!v)).unwrap_or(Cell::Null),
-    U::Plus => value.integer()?.map(Cell::Integer).unwrap_or(Cell::Null),
-    U::Minus => match value.integer()? {
-      Some(v) => Cell::Integer(v.checked_neg().ok_or("integer overflow")?),
-      None => Cell::Null,
-    },
-    U::PGBitwiseNot => value
-      .integer()?
-      .map(|v| Cell::Integer(!v))
-      .unwrap_or(Cell::Null),
-    _ => return Err(format!("unsupported unary operator {op}").into()),
-  })
-}
-
-/// Evaluates conditions in order and only evaluates the selected result branch.
-fn eval_case(
-  operand: Option<&Expr>,
-  clauses: &[(Expr, Expr)],
-  otherwise: &Expr,
-  ctx: &EvalContext<'_>,
-) -> Result<Cell> {
-  let operand = operand.map(|expr| expr.eval(ctx)).transpose()?;
-  for (condition, value) in clauses {
-    let condition = condition.eval(ctx)?;
-    let yes = if let Some(operand) = &operand {
-      binary(&B::Eq, operand.clone(), condition)?.truth()?
-    } else {
-      condition.truth()?
-    };
-    if yes == Some(true) {
-      return value.eval(ctx);
-    }
-  }
-  otherwise.eval(ctx)
-}
-
-fn eval_raw(value: Cell, width: Option<u32>) -> Cell {
-  match value {
-    Cell::Bits(bits) => Cell::Text(bits),
-    Cell::Integer(v) => Cell::Text(if let Some(width) = width {
-      format!("{v:0width$b}", width = width as usize)
-    } else {
-      format!("{v:b}")
-    }),
-    value => value,
-  }
-}
-
-fn eval_bit(value: &Cell, index: &Cell) -> Result<Cell> {
-  Ok(match index.integer()? {
-    Some(bit) if (0..128).contains(&bit) => match value {
-      Cell::Bits(bits) => bits
-        .as_bytes()
-        .iter()
-        .rev()
-        .nth(bit as usize)
-        .and_then(|b| match b {
-          b'0' => Some(0),
-          b'1' => Some(1),
-          _ => None,
-        })
-        .map(Cell::Integer)
-        .unwrap_or(Cell::Null),
-      value => value
-        .integer()?
-        .map(|v| Cell::Integer((v >> bit) & 1))
-        .unwrap_or(Cell::Null),
-    },
-    None => Cell::Null,
-    _ => return Err("bit index must be 0..127".into()),
-  })
-}
-
-/// Implements checked integer operations and SQL three-valued predicates.
-fn binary(op: &B, left: Cell, right: Cell) -> Result<Cell> {
-  if matches!(op, B::And | B::Or | B::Xor) {
-    let (a, b) = (left.truth()?, right.truth()?);
-    return Ok(match op {
-      B::And => {
-        if a == Some(false) || b == Some(false) {
-          Cell::Bool(false)
-        } else if a == Some(true) && b == Some(true) {
-          Cell::Bool(true)
-        } else {
-          Cell::Null
-        }
-      }
-      B::Or => {
-        if a == Some(true) || b == Some(true) {
-          Cell::Bool(true)
-        } else if a == Some(false) && b == Some(false) {
-          Cell::Bool(false)
-        } else {
-          Cell::Null
-        }
-      }
-      _ => a
-        .zip(b)
-        .map(|(a, b)| Cell::Bool(a ^ b))
-        .unwrap_or(Cell::Null),
-    });
-  }
-  if matches!(left, Cell::Null) || matches!(right, Cell::Null) {
-    return Ok(Cell::Null);
-  }
-  if let (Cell::Text(a), Cell::Text(b)) = (&left, &right) {
-    if matches!(op, B::StringConcat) {
-      return Ok(Cell::Text(format!("{a}{b}")));
-    }
-    return comparison(op, a.cmp(b)).map(Cell::Bool);
-  }
-  let (Some(a), Some(b)) = (left.integer()?, right.integer()?) else {
-    return Ok(Cell::Null);
-  };
-  if matches!(op, B::Eq | B::NotEq | B::Gt | B::GtEq | B::Lt | B::LtEq) {
-    return comparison(op, a.cmp(&b)).map(Cell::Bool);
-  }
-  let value = match op {
-    B::Plus => a.checked_add(b),
-    B::Minus => a.checked_sub(b),
-    B::Multiply => a.checked_mul(b),
-    B::Divide | B::DuckIntegerDivide | B::MyIntegerDivide => a.checked_div(b),
-    B::Modulo => a.checked_rem(b),
-    B::BitwiseAnd => Some(a & b),
-    B::BitwiseOr => Some(a | b),
-    B::BitwiseXor | B::PGBitwiseXor => Some(a ^ b),
-    B::PGBitwiseShiftLeft if (0..128).contains(&b) => a.checked_shl(b as u32),
-    B::PGBitwiseShiftRight if (0..128).contains(&b) => a.checked_shr(b as u32),
-    _ => return Err(format!("unsupported or invalid binary operation {a} {op} {b}").into()),
-  }
-  .ok_or("integer overflow or division by zero")?;
-  Ok(Cell::Integer(value))
-}
-
-fn comparison(op: &B, order: Ordering) -> Result<bool> {
-  Ok(match op {
-    B::Eq => order == Ordering::Equal,
-    B::NotEq => order != Ordering::Equal,
-    B::Gt => order == Ordering::Greater,
-    B::GtEq => order != Ordering::Less,
-    B::Lt => order == Ordering::Less,
-    B::LtEq => order != Ordering::Greater,
-    _ => return Err(format!("invalid comparison {op}").into()),
-  })
 }
 
 /// Compiled reduction shared by all groups; each group owns a separate Cell state.
@@ -382,22 +398,6 @@ pub(super) enum OrderExpression {
   Projection(usize),
   /// Additional expression evaluated in the same context as the projection.
   Expression(Expr),
-}
-
-impl<'a> EvalContext<'a> {
-  /// Sample-phase expressions can read bindings and temporal results only.
-  pub(super) fn sample(cells: &'a [Cell], temporal: &'a [Cell]) -> Self {
-    Self {
-      cells,
-      temporal,
-      groups: &[],
-      aggregates: &[],
-    }
-  }
-
-  pub(super) fn evaluate(&self, expressions: &[Expr]) -> Result<Vec<Cell>> {
-    expressions.iter().map(|expr| expr.eval(self)).collect()
-  }
 }
 
 impl Order {
