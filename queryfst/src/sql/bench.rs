@@ -3,14 +3,12 @@
 use super::plan::Plan;
 use super::value::Cell;
 use super::{MatchMode, Options, PeriodicSampling, Report};
+use criterion::{BenchmarkId, Criterion};
 use std::collections::{BTreeMap, HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::hint::black_box;
-use std::time::{Duration, Instant};
 
-pub(crate) const PHASES: [&str; 3] = ["compile", "parse_compile", "execute_256"];
-
-pub(crate) fn workloads() -> Vec<(String, String)> {
+fn workloads() -> Vec<(String, String)> {
   let mut cases = vec![
     (
       "simple".into(),
@@ -141,83 +139,67 @@ fn execute(mut plan: Plan) -> u64 {
   digest.finish()
 }
 
-fn measure(mut operation: impl FnMut(), duration: Duration) -> f64 {
-  // Calibrate outside the timed interval; amortize clock reads over batches.
-  let mut batch = 1;
-  loop {
-    let start = Instant::now();
-    for _ in 0..batch {
-      operation();
-    }
-    if start.elapsed() >= Duration::from_micros(200) {
-      break;
-    }
-    batch *= 2;
-  }
-  let start = Instant::now();
-  let mut iterations = 0_u64;
-  while start.elapsed() < duration {
-    for _ in 0..batch {
-      operation();
-    }
-    iterations += batch;
-  }
-  start.elapsed().as_nanos() as f64 / iterations as f64
-}
-
-#[test]
-#[ignore = "raw timing worker; prefer cargo bench -p queryfst --bench sql_compile"]
-fn sql_compile_microbench() {
-  let ms = std::env::var("SQL_BENCH_MS")
-    .unwrap_or("30".into())
-    .parse()
-    .unwrap();
-  let rotation: usize = std::env::var("SQL_BENCH_ROTATION")
-    .unwrap_or("0".into())
-    .parse()
-    .unwrap();
-  for measurement in run(ms, rotation) {
-    println!("BENCH {measurement}");
-  }
-}
-
-/// One timing round; the Cargo benchmark runner handles processes and statistics.
-pub(crate) fn run(ms: u64, rotation: usize) -> Vec<serde_json::Value> {
-  assert!(ms > 0, "measurement duration must be positive");
-  let duration = Duration::from_millis(ms);
-  let mut measurements = Vec::new();
-  let schema = ["tick", "sample_index", "a", "b"]
+fn schema() -> HashMap<String, (usize, u32)> {
+  ["tick", "sample_index", "a", "b"]
     .into_iter()
     .enumerate()
     .map(|(i, name)| (name.to_string(), (i, 8)))
-    .collect::<HashMap<_, _>>();
-  let mut cases = workloads();
-  let count = cases.len();
-  cases.rotate_left(rotation % count);
-  for (name, sql) in cases {
+    .collect()
+}
+
+/// Registers the same workloads and timing boundaries for Criterion.
+// Called by the separate benchmark target, not the binary's unit-test harness.
+#[allow(dead_code)]
+pub(crate) fn benchmarks(criterion: &mut Criterion) {
+  let schema = schema();
+  let mut group = criterion.benchmark_group("sql_compile");
+  for (name, sql) in workloads() {
     let options = options(sql);
     let ast = Plan::parse(&options.sql).unwrap();
     let fingerprint = execute(Plan::compile(&ast, &schema, &options).unwrap());
-    for phase in PHASES {
-      let ns = measure(
-        || match phase {
-          "compile" => {
-            black_box(Plan::compile(black_box(&ast), &schema, &options).unwrap());
-          }
-          "parse_compile" => {
-            let ast = Plan::parse(black_box(&options.sql)).unwrap();
-            black_box(Plan::compile(&ast, &schema, &options).unwrap());
-          }
-          _ => {
-            black_box(execute(Plan::compile(&ast, &schema, &options).unwrap()));
-          }
-        },
-        duration,
-      );
-      measurements.push(
-        serde_json::json!({"case":name, "phase":phase, "ns":ns, "fingerprint":fingerprint.to_string()})
-      );
-    }
+
+    group.bench_function(BenchmarkId::new("compile", &name), |b| {
+      b.iter(|| {
+        // Keep destruction inside the measurement, as in the original harness.
+        black_box(Plan::compile(black_box(&ast), &schema, &options).unwrap());
+      });
+    });
+    group.bench_function(BenchmarkId::new("parse_compile", &name), |b| {
+      b.iter(|| {
+        let ast = Plan::parse(black_box(&options.sql)).unwrap();
+        black_box(Plan::compile(&ast, &schema, &options).unwrap());
+      });
+    });
+    group.bench_function(BenchmarkId::new("execute_256", &name), |b| {
+      b.iter(|| {
+        // This phase includes planning, execution and output fingerprinting.
+        black_box(execute(Plan::compile(&ast, &schema, &options).unwrap()));
+      });
+    });
+
+    // Check repeatability outside Criterion's measured closures.
+    assert_eq!(
+      execute(Plan::compile(&ast, &schema, &options).unwrap()),
+      fingerprint,
+      "non-repeatable results for {name}",
+    );
   }
-  measurements
+  group.finish();
+}
+
+/// Export deterministic row/schema/report digests separately from timing data.
+/// Compare this line across revisions built with the same toolchain and target.
+#[test]
+fn workload_fingerprints() {
+  let schema = schema();
+  let fingerprints = workloads()
+    .into_iter()
+    .map(|(name, sql)| {
+      let options = options(sql);
+      let ast = Plan::parse(&options.sql).unwrap();
+      let fingerprint = execute(Plan::compile(&ast, &schema, &options).unwrap());
+      (name, fingerprint.to_string())
+    })
+    .collect::<BTreeMap<_, _>>();
+  println!("SQL_FINGERPRINTS {}", serde_json::json!(fingerprints));
 }
