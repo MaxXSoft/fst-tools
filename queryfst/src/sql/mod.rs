@@ -8,6 +8,7 @@ mod context;
 mod deadline;
 mod executor;
 mod expr_index;
+mod functions;
 mod ir;
 mod normalize;
 mod plan;

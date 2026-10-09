@@ -2,14 +2,14 @@
 
 use crate::error::Result;
 use crate::sql::expr_index::ExprIndex;
-use crate::sql::ir::{Aggregate, Expr, ScalarFunction};
-use crate::sql::temporal::{Temporal, TemporalKind};
+use crate::sql::functions::{self, AggregateFunction, BuiltinFunction, TemporalFunction};
+use crate::sql::ir::{Aggregate, Expr};
+use crate::sql::temporal::Temporal;
 use crate::sql::value::Cell;
 use sqlparser::ast::{
   self, BinaryOperator as B, Expr as A, FunctionArg, FunctionArgExpr, FunctionArguments,
   UnaryOperator as U,
 };
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash, Hasher};
 
@@ -59,27 +59,6 @@ impl CompileContext {
   }
 }
 
-/// Aggregate names recognized both by grouping detection and expression lowering.
-#[derive(Clone, Copy)]
-enum AggregateFunction {
-  Count,
-  Sum,
-  Min,
-  Max,
-}
-
-impl AggregateFunction {
-  fn parse(name: &str) -> Option<Self> {
-    Some(match name {
-      "count" => Self::Count,
-      "sum" => Self::Sum,
-      "min" => Self::Min,
-      "max" => Self::Max,
-      _ => return None,
-    })
-  }
-}
-
 /// Resolves sample bindings and interns aggregate and temporal expressions.
 pub(super) struct Compiler<'a, 'ast> {
   schema: &'a HashMap<String, (usize, u32)>,
@@ -90,22 +69,6 @@ pub(super) struct Compiler<'a, 'ast> {
   /// Dependency order: nested temporal inputs are registered before their users.
   pub temporal: Vec<Temporal>,
   temporal_keys: HashMap<CallKey<'ast>, usize>,
-}
-
-/// Normalized builtin names can be borrowed; raw AST grouping detection also
-/// calls this helper, so retain case folding and quoting for other spellings.
-fn function_name(function: &ast::Function) -> Cow<'_, str> {
-  if let [name] = function.name.0.as_slice()
-    && name.quote_style.is_none()
-  {
-    if name.value.bytes().any(|b| b.is_ascii_uppercase()) {
-      Cow::Owned(name.value.to_ascii_lowercase())
-    } else {
-      Cow::Borrowed(&name.value)
-    }
-  } else {
-    Cow::Owned(function.name.to_string().to_ascii_lowercase())
-  }
 }
 
 fn strip(expr: &A) -> &A {
@@ -327,26 +290,36 @@ impl<'a, 'ast> Compiler<'a, 'ast> {
 
   fn function(&mut self, function: &'ast ast::Function, ctx: CompileContext) -> Result<Expr> {
     let args = function_arguments(function)?;
-    let name = function_name(function);
-    if let Some(kind) = AggregateFunction::parse(&name) {
-      return self.aggregate(function, &name, kind, &args, ctx);
+    let kind = functions::resolve(&function.name);
+    // Preserve wildcard diagnostics even for unsupported function names.
+    if !matches!(kind, Some(BuiltinFunction::Aggregate(_))) && args.iter().any(Option::is_none) {
+      return Err("wildcard requires COUNT(*)".into());
     }
-    let args = args
-      .into_iter()
-      .collect::<Option<Vec<_>>>()
-      .ok_or("wildcard requires COUNT(*)")?;
-    if let Some(kind) = TemporalKind::parse(&name, self.max_pending) {
-      return self.temporal(function, &name, kind, &args, ctx);
+    let kind = kind.ok_or_else(|| {
+      format!(
+        "unsupported function {}",
+        function.name.to_string().to_ascii_lowercase()
+      )
+    })?;
+    let name = kind.canonical_name();
+    match kind {
+      BuiltinFunction::Aggregate(kind) => self.aggregate(function, name, kind, &args, ctx),
+      BuiltinFunction::Temporal(kind) => {
+        let args = expression_arguments(args)?;
+        self.temporal(function, name, kind, &args, ctx)
+      }
+      BuiltinFunction::Raw => {
+        let args = expression_arguments(args)?;
+        self.raw(&args, ctx)
+      }
+      BuiltinFunction::Scalar(kind) => {
+        if !kind.accepts_arity(args.len()) {
+          return Err(format!("invalid number of arguments for {name}").into());
+        }
+        let args = expression_arguments(args)?;
+        Ok(Expr::Function(kind, self.arguments(&args, ctx)?))
+      }
     }
-    if name == "raw" {
-      return self.raw(&args, ctx);
-    }
-    let kind =
-      ScalarFunction::parse(&name).ok_or_else(|| format!("unsupported function {name}"))?;
-    if !kind.accepts_arity(args.len()) {
-      return Err(format!("invalid number of arguments for {name}").into());
-    }
-    Ok(Expr::Function(kind, self.arguments(&args, ctx)?))
   }
 
   fn arguments(&mut self, args: &[&'ast A], ctx: CompileContext) -> Result<Vec<Expr>> {
@@ -392,7 +365,7 @@ impl<'a, 'ast> Compiler<'a, 'ast> {
     &mut self,
     function: &'ast ast::Function,
     name: &str,
-    kind: TemporalKind,
+    kind: TemporalFunction,
     args: &[&'ast A],
     ctx: CompileContext,
   ) -> Result<Expr> {
@@ -410,13 +383,15 @@ impl<'a, 'ast> Compiler<'a, 'ast> {
     }
     // Lower inputs first so nested temporal dependencies precede this node.
     let args = self.arguments(args, CompileContext::SAMPLE)?;
-    if matches!(kind, TemporalKind::Timeouts(_))
+    if matches!(kind, TemporalFunction::Timeouts)
       && !matches!(args[2], Expr::Const(Cell::Integer(v)) if v >= 0 && v <= i128::from(u64::MAX))
     {
       return Err("timeouts deadline must be a nonnegative u64 integer literal".into());
     }
     let index = self.temporal.len();
-    self.temporal.push(Temporal::new(kind, args));
+    self
+      .temporal
+      .push(Temporal::new(kind, args, self.max_pending));
     self.temporal_keys.insert(key, index);
     Ok(Expr::Temporal(index))
   }
@@ -460,6 +435,14 @@ fn negate(expr: Expr, negated: bool) -> Expr {
   } else {
     expr
   }
+}
+
+/// Collects non-wildcard arguments while allowing reuse of the input allocation.
+fn expression_arguments(args: Vec<Option<&A>>) -> Result<Vec<&A>> {
+  args
+    .into_iter()
+    .collect::<Option<Vec<_>>>()
+    .ok_or_else(|| "wildcard requires COUNT(*)".into())
 }
 
 /// Validates modifiers and preserves the COUNT(*) wildcard until classification.
@@ -506,7 +489,7 @@ fn sum(value: Expr) -> Aggregate {
 pub(super) fn has_aggregate(expr: &A) -> bool {
   // Used only to choose grouping context; the compiler then checks every AST node.
   match expr {
-    A::Function(f) if AggregateFunction::parse(&function_name(f)).is_some() => true,
+    A::Function(f) if functions::is_aggregate(&f.name) => true,
     A::Nested(e)
     | A::UnaryOp { expr: e, .. }
     | A::IsNull(e)

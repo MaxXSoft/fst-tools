@@ -4,6 +4,7 @@
 //! Only supported, unquoted builtin names and the known/is_known alias are folded.
 //! Identifiers, literals, argument order and unsupported modifiers stay intact.
 
+use crate::sql::functions;
 use sqlparser::ast::{Expr, Visit, VisitMut, visit_expressions, visit_expressions_mut};
 use std::borrow::Cow;
 use std::ops::ControlFlow;
@@ -51,38 +52,7 @@ fn canonical_function_name(expr: &Expr) -> Option<&'static str> {
   let Expr::Function(function) = expr else {
     return None;
   };
-  let [name] = function.name.0.as_slice() else {
-    return None;
-  };
-  if name.quote_style.is_some() {
-    return None;
-  }
-  if name.value.eq_ignore_ascii_case("is_known") {
-    return Some("known");
-  }
-  if !name.value.bytes().any(|b| b.is_ascii_uppercase()) {
-    return None;
-  }
-  [
-    "count",
-    "sum",
-    "min",
-    "max",
-    "coalesce",
-    "known",
-    "abs",
-    "bit",
-    "hex",
-    "raw",
-    "lag",
-    "changed",
-    "hold",
-    "run_length",
-    "runs",
-    "timeouts",
-  ]
-  .into_iter()
-  .find(|canonical| name.value != *canonical && name.value.eq_ignore_ascii_case(canonical))
+  functions::canonical_replacement(&function.name)
 }
 
 #[cfg(test)]
