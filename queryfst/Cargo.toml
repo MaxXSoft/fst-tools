@@ -15,8 +15,7 @@ serde_json = "1.0"
 sqlparser = { version = "0.53", default-features = false, features = ["std", "visitor"] }
 
 [dev-dependencies]
-serde = { version = "1.0", features = ["derive"] }
-sha2 = "0.10"
+criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = "3.23.0"
 
 [[bench]]

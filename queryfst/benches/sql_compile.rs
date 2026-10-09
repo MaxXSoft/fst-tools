@@ -11,9 +11,15 @@ mod error;
 #[path = "../src/sql/mod.rs"]
 mod sql;
 
-#[path = "support/runner.rs"]
-mod runner;
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::time::Duration;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-  runner::run()
+criterion_group! {
+  name = benches;
+  config = Criterion::default()
+    .warm_up_time(Duration::from_millis(100))
+    .measurement_time(Duration::from_millis(500))
+    .sample_size(50);
+  targets = sql::bench::benchmarks
 }
+criterion_main!(benches);
