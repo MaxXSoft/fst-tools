@@ -368,3 +368,103 @@ fn grouping_and_ordering_normalize_sql_equivalent_numeric_types() {
     ]
   );
 }
+
+#[test]
+fn scalar_dispatch_preserves_aliases_nulls_and_lazy_branches() {
+  let dir = directory();
+  fixture(dir.path());
+  let records = run(
+    dir.path(),
+    "SELECT CoAlEsCe(NULL, AbS(-3), 1/0), KnOwN(unknown), Is_KnOwN(a),
+       HeX(255), BiT(unknown,2), bit(unknown,0), bit(a,NULL), +a, -a, NOT NULL,
+       CASE a WHEN 0 THEN 7 ELSE 1/0 END,
+       CASE NULL WHEN NULL THEN 1/0 ELSE 8 END,
+       a NOT BETWEEN 1 AND 3, a NOT IN (1,2)
+     FROM samples LIMIT 1",
+    &[],
+  );
+  assert_eq!(
+    rows(&records),
+    vec![json!([
+      "3", false, true, "ff", "1", null, null, "0", "0", null, "7", "8", true, true
+    ])]
+  );
+  let records = run(
+    dir.path(),
+    "SELECT SUM((a >> 1) & 1), SUM(bit(a,1)), ABS(SUM(a)), COUNT(*)
+     FROM samples ORDER BY COALESCE(MAX(a),0)",
+    &[],
+  );
+  assert_eq!(rows(&records), vec![json!(["2", "2", "10", "5"])]);
+}
+
+#[test]
+fn nested_temporal_dependencies_and_unknown_resets_survive_filtering() {
+  let dir = directory();
+  fixture(dir.path());
+  let records = run(
+    dir.path(),
+    "SELECT tick, lag(lag(a)), lag(a), changed(lag(a)),
+       hold(a, CASE WHEN tick=2 THEN NULL WHEN tick=1 THEN TRUE ELSE FALSE END),
+       run_length(CASE WHEN tick=2 THEN NULL ELSE TRUE END),
+       runs(CASE WHEN tick=2 THEN NULL ELSE TRUE END)
+     FROM samples WHERE tick IN (0,2,3,4)",
+    &[],
+  );
+  assert_eq!(
+    rows(&records),
+    vec![
+      json!(["0", null, null, false, null, "1", true]),
+      json!(["2", "0", "1", true, null, null, null]),
+      json!(["3", "1", "2", true, null, "1", true]),
+      json!(["4", "2", "3", true, null, "2", false]),
+    ]
+  );
+}
+
+#[test]
+fn function_arity_and_context_errors_are_rejected_before_sampling() {
+  let dir = directory();
+  fixture(dir.path());
+  for expression in [
+    "coalesce()",
+    "known()",
+    "is_known(a,b)",
+    "abs()",
+    "hex(a,b)",
+    "bit(a)",
+    "raw(a,b)",
+    "lag()",
+    "changed(a,b)",
+    "hold(a)",
+    "run_length()",
+    "runs(a,b)",
+    "timeouts(a,b)",
+    "timeouts(a,b,1,a,b)",
+    "timeouts(a,b,NULL)",
+    "unknown_function(a)",
+    "SUM(*)",
+    "MIN(*)",
+    "MAX(*)",
+    "COUNT(a,b)",
+    "bit(*)",
+    "lag(SUM(a))",
+    "COALESCE(SUM(COUNT(*)),0)",
+  ] {
+    let sql = format!("SELECT {expression} FROM samples WHERE FALSE");
+    assert!(
+      !invoke(dir.path(), &sql, &[]).status.success(),
+      "unexpected success: {sql}"
+    );
+  }
+  for sql in [
+    "SELECT a FROM samples GROUP BY b ORDER BY abs(a)",
+    "SELECT lag(a) FROM samples GROUP BY b",
+    "SELECT a FROM samples WHERE coalesce(SUM(a),0)=0",
+  ] {
+    assert!(
+      !invoke(dir.path(), sql, &[]).status.success(),
+      "unexpected success: {sql}"
+    );
+  }
+}
