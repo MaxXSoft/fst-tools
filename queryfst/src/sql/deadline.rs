@@ -3,7 +3,7 @@
 //! the same key. Pending requests at EOF are unresolved, never counted as late.
 
 use crate::error::{Error, Result};
-use crate::sql::Cell;
+use crate::sql::value::Cell;
 use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Debug)]
