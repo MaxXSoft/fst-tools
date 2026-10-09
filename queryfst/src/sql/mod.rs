@@ -1,5 +1,7 @@
 //! Finite SQL queries over explicitly sampled waveform state.
 
+#[cfg(test)]
+mod bench;
 mod bindings;
 mod compiler;
 mod context;
