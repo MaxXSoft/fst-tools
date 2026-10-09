@@ -264,31 +264,45 @@ experimental result tables remain outside the repository's tracked fixtures.
 
 ## SQL microbenchmarks
 
-Run `cargo bench -p queryfst --bench sql_compile`. The stable Rust harness runs
-16 workloads in three phases: planning an existing AST, parsing plus planning,
-and planning plus execution over 256 synthetic samples. FST decoding, CLI startup,
-and output I/O are excluded. By default it uses nine serial rounds and at least
-30 ms per workload/phase; override these with `-- --rounds 5 --ms 50`.
+Run `cargo bench -p queryfst --bench sql_compile`. Criterion measures 16 workloads
+in three phases: `compile` plans an existing AST, `parse_compile` also parses the
+SQL, and `execute_256` plans and executes 256 synthetic samples, including result
+fingerprinting. Plan destruction is included in every phase. FST decoding, CLI
+startup, and output I/O are excluded.
 
-The runner checks result fingerprints (rows, column names, completion metadata)
-across all rounds and versions. JSON on stdout includes raw measurements, median,
-MAD, min/max, host OS/architecture, and executable paths/SHA-256 hashes. Progress
-goes to stderr. Keep saved executables and measurements under ignored `debug/`.
+Each measurement uses a 100 ms warm-up, a 500 ms measurement target, and 50 samples
+by default. For longer runs, pass
+`-- --warm-up-time 1 --measurement-time 2 --sample-size 100`.
+To filter measurements, use, for example,
+`cargo bench -p queryfst --bench sql_compile -- 'sql_compile/compile/'`.
+Criterion saves measurements and HTML reports under `target/criterion/`; open
+`target/criterion/report/index.html` for the report index.
 
-To compare revisions, build each with
-`cargo bench -p queryfst --bench sql_compile --no-run --message-format=json` and
-copy the `compiler-artifact.executable` for the `sql_compile` target before
-changing revisions. Then run:
+To compare revisions, save a named timing baseline before changing the code:
 
 ```sh
-cargo bench -p queryfst --bench sql_compile -- \
-  --compare baseline="$PWD/debug/sql-base" --compare candidate="$PWD/debug/sql-new" \
-  > debug/sql-comparison.json
+cargo bench -p queryfst --bench sql_compile -- --save-baseline before
+# After changing revisions:
+cargo bench -p queryfst --bench sql_compile -- --baseline before
 ```
 
-Pass absolute paths when invoking through Cargo, which runs the benchmark from
-the package directory. Executable and workload order rotate between rounds. Use the same host,
-toolchain, build profile, and workload definitions, and avoid concurrent builds
-or tests while timing. The optional `--legacy-compare LABEL=PATH` accepts saved
-release test executables from the former Python harness. The old ignored timing
-test remains available as a raw worker; normal `cargo test` does not time it.
+Keep the same Criterion output directory between runs. Across worktrees, set
+`CRITERION_HOME` to the same absolute directory under ignored `debug/`. Baselines
+compare saved measurements; they do not rerun the old executable. Use the same
+host, toolchain, build profile, workload definitions, and measurement settings,
+and avoid concurrent builds or tests while timing. Generate fresh baselines when
+switching from the former custom runner to Criterion.
+
+Timing baselines do not check SQL results. The benchmark checks repeatability
+outside the timed closures, and a separate test exports fingerprints covering
+rows, column names, and completion metadata:
+
+```sh
+cargo test -p queryfst --bin queryfst sql::bench::workload_fingerprints -- --exact --show-output
+```
+
+Compare the `SQL_FINGERPRINTS` JSON line across revisions using the same toolchain
+and target; these Rust hashes are not a portable file format. Keep captured output
+under ignored `debug/`. Run `cargo test -p queryfst` for semantic regressions and
+`cargo test -p queryfst --bench sql_compile` to smoke-test all 48 measurements
+without collecting timings.
