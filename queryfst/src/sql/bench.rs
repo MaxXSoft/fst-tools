@@ -8,7 +8,9 @@ use std::hash::{Hash, Hasher};
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-fn workloads() -> Vec<(String, String)> {
+pub(crate) const PHASES: [&str; 3] = ["compile", "parse_compile", "execute_256"];
+
+pub(crate) fn workloads() -> Vec<(String, String)> {
   let mut cases = vec![
     (
       "simple".into(),
@@ -164,18 +166,26 @@ fn measure(mut operation: impl FnMut(), duration: Duration) -> f64 {
 }
 
 #[test]
-#[ignore = "run explicitly using queryfst/benches/sql_compile.py"]
+#[ignore = "raw timing worker; prefer cargo bench -p queryfst --bench sql_compile"]
 fn sql_compile_microbench() {
-  let duration = Duration::from_millis(
-    std::env::var("SQL_BENCH_MS")
-      .unwrap_or("30".into())
-      .parse()
-      .unwrap(),
-  );
+  let ms = std::env::var("SQL_BENCH_MS")
+    .unwrap_or("30".into())
+    .parse()
+    .unwrap();
   let rotation: usize = std::env::var("SQL_BENCH_ROTATION")
     .unwrap_or("0".into())
     .parse()
     .unwrap();
+  for measurement in run(ms, rotation) {
+    println!("BENCH {measurement}");
+  }
+}
+
+/// One timing round; the Cargo benchmark runner handles processes and statistics.
+pub(crate) fn run(ms: u64, rotation: usize) -> Vec<serde_json::Value> {
+  assert!(ms > 0, "measurement duration must be positive");
+  let duration = Duration::from_millis(ms);
+  let mut measurements = Vec::new();
   let schema = ["tick", "sample_index", "a", "b"]
     .into_iter()
     .enumerate()
@@ -188,7 +198,7 @@ fn sql_compile_microbench() {
     let options = options(sql);
     let ast = Plan::parse(&options.sql).unwrap();
     let fingerprint = execute(Plan::compile(&ast, &schema, &options).unwrap());
-    for phase in ["compile", "parse_compile", "execute_256"] {
+    for phase in PHASES {
       let ns = measure(
         || match phase {
           "compile" => {
@@ -204,10 +214,10 @@ fn sql_compile_microbench() {
         },
         duration,
       );
-      println!(
-        "BENCH {}",
+      measurements.push(
         serde_json::json!({"case":name, "phase":phase, "ns":ns, "fingerprint":fingerprint.to_string()})
       );
     }
   }
+  measurements
 }
