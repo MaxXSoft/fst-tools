@@ -12,9 +12,11 @@ pub(super) enum ExprIndex<'a> {
 }
 
 impl<'a> ExprIndex<'a> {
-  /// The SQL planning microbench favors linear lookup through 16 expressions.
+  /// Empirical crossover from SQL planning microbenchmarks; not a semantic limit.
+  const LINEAR_SEARCH_LIMIT: usize = 16;
+
   pub(super) fn new(expressions: impl ExactSizeIterator<Item = &'a Expr>) -> Self {
-    if expressions.len() <= 16 {
+    if expressions.len() <= Self::LINEAR_SEARCH_LIMIT {
       Self::Linear(expressions.collect())
     } else {
       let mut indices = HashMap::with_capacity(expressions.len());
@@ -40,12 +42,19 @@ mod tests {
 
   #[test]
   fn both_representations_keep_the_first_duplicate_index() {
-    for count in [4, 32] {
+    for count in [
+      ExprIndex::LINEAR_SEARCH_LIMIT - 1,
+      ExprIndex::LINEAR_SEARCH_LIMIT,
+    ] {
       let mut expressions = (0..count)
         .map(|i| Expr::Value(Value::Number(i.to_string(), false)))
         .collect::<Vec<_>>();
       expressions.push(expressions[0].clone());
       let index = ExprIndex::new(expressions.iter());
+      assert_eq!(
+        matches!(&index, ExprIndex::Linear(_)),
+        expressions.len() <= ExprIndex::LINEAR_SEARCH_LIMIT
+      );
       assert_eq!(index.get(&expressions[count]), Some(0));
       assert_eq!(index.get(&expressions[count - 1]), Some(count - 1));
       assert_eq!(index.get(&Expr::Value(Value::Null)), None);

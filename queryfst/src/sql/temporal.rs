@@ -2,6 +2,7 @@
 
 use crate::error::Result;
 use crate::sql::deadline::Deadline;
+use crate::sql::functions::TemporalFunction;
 use crate::sql::ir::{EvalContext, Expr};
 use crate::sql::value::Cell;
 
@@ -14,8 +15,11 @@ pub(super) struct Temporal {
 
 impl Temporal {
   /// Inputs have compiler-validated arity and contain no aggregate references.
-  pub(super) fn new(kind: TemporalKind, args: Vec<Expr>) -> Self {
-    Self { kind, args }
+  pub(super) fn new(function: TemporalFunction, args: Vec<Expr>, max_pending: usize) -> Self {
+    Self {
+      kind: TemporalKind::new(function, max_pending),
+      args,
+    }
   }
 
   /// Advances once per sampled row, after dependencies and before WHERE.
@@ -38,7 +42,7 @@ impl Temporal {
 }
 
 /// Each temporal operation owns only the history required by that operation.
-pub(super) enum TemporalKind {
+enum TemporalKind {
   /// Bounded request/response tracker, initially empty.
   Timeouts(Deadline),
   /// Previous sample value, initially NULL.
@@ -54,25 +58,15 @@ pub(super) enum TemporalKind {
 }
 
 impl TemporalKind {
-  /// Resolves a lowercase SQL name once and constructs its initial state.
-  pub(super) fn parse(name: &str, max_pending: usize) -> Option<Self> {
-    Some(match name {
-      "timeouts" => Self::Timeouts(Deadline::new(max_pending)),
-      "lag" => Self::Lag(Cell::Null),
-      "changed" => Self::Changed(Cell::Null),
-      "hold" => Self::Hold(Cell::Null),
-      "run_length" => Self::RunLength(0),
-      "runs" => Self::Runs(0),
-      _ => return None,
-    })
-  }
-
-  /// Returns the accepted arity nearest to the supplied count for diagnostics.
-  pub(super) fn expected_arity(&self, count: usize) -> usize {
-    match self {
-      Self::Timeouts(_) => count.clamp(3, 4),
-      Self::Hold(_) => 2,
-      Self::Lag(_) | Self::Changed(_) | Self::RunLength(_) | Self::Runs(_) => 1,
+  /// Constructs history only when the compiler registers a distinct temporal call.
+  fn new(function: TemporalFunction, max_pending: usize) -> Self {
+    match function {
+      TemporalFunction::Timeouts => Self::Timeouts(Deadline::new(max_pending)),
+      TemporalFunction::Lag => Self::Lag(Cell::Null),
+      TemporalFunction::Changed => Self::Changed(Cell::Null),
+      TemporalFunction::Hold => Self::Hold(Cell::Null),
+      TemporalFunction::RunLength => Self::RunLength(0),
+      TemporalFunction::Runs => Self::Runs(0),
     }
   }
 

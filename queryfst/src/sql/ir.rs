@@ -1,6 +1,7 @@
 //! Bound SQL expressions, reductions, ordering rules, and their evaluation.
 
 use crate::error::Result;
+use crate::sql::functions::ScalarFunction;
 use crate::sql::value::Cell;
 use sqlparser::ast::{BinaryOperator as B, UnaryOperator as U};
 use std::cmp::Ordering;
@@ -239,38 +240,7 @@ fn eval_bit(value: &Cell, index: &Cell) -> Result<Cell> {
   })
 }
 
-/// Supported scalar functions, resolved from names and aliases during compilation.
-#[derive(Clone, Copy, Debug)]
-pub(super) enum ScalarFunction {
-  /// Evaluates arguments only through the first non-NULL result.
-  Coalesce,
-  /// Both known() and is_known() use this operation.
-  Known,
-  Abs,
-  Bit,
-  Hex,
-}
-
 impl ScalarFunction {
-  pub(super) fn parse(name: &str) -> Option<Self> {
-    Some(match name {
-      "coalesce" => Self::Coalesce,
-      "known" | "is_known" => Self::Known,
-      "abs" => Self::Abs,
-      "bit" => Self::Bit,
-      "hex" => Self::Hex,
-      _ => return None,
-    })
-  }
-
-  pub(super) fn accepts_arity(self, count: usize) -> bool {
-    match self {
-      Self::Coalesce => count > 0,
-      Self::Known | Self::Abs | Self::Hex => count == 1,
-      Self::Bit => count == 2,
-    }
-  }
-
   /// Arguments have compiler-validated arity; COALESCE retains lazy evaluation.
   fn eval(self, args: &[Expr], ctx: &EvalContext<'_>) -> Result<Cell> {
     Ok(match self {
