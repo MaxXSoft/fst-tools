@@ -1,7 +1,7 @@
 //! Query planning and streaming execution of bound SQL expressions.
 
 use crate::error::{Error, Result};
-use crate::sql::compiler::{Compiler, has_aggregate, key};
+use crate::sql::compiler::{CompileContext, Compiler, has_aggregate, key};
 use crate::sql::context::Context as MatchContext;
 use crate::sql::ir::{Aggregate, EvalContext, Expr, Order, OrderExpression};
 use crate::sql::temporal::Temporal;
@@ -162,15 +162,15 @@ impl Plan {
     let selection = select
       .selection
       .as_ref()
-      .map(|expr| compiler.compile(expr, false, false))
+      .map(|expr| compiler.compile(expr, CompileContext::SAMPLE))
       .transpose()?;
     let group_by = group_ast
       .iter()
-      .map(|expr| compiler.compile(expr, false, false))
+      .map(|expr| compiler.compile(expr, CompileContext::SAMPLE))
       .collect::<Result<Vec<_>>>()?;
     let projection = projection_ast
       .iter()
-      .map(|expr| compiler.compile(expr, true, aggregate))
+      .map(|expr| compiler.compile(expr, CompileContext::projection(aggregate)))
       .collect::<Result<Vec<_>>>()?;
     let mut order = Vec::new();
     if let Some(order_by) = &query.order_by {
@@ -197,7 +197,9 @@ impl Plan {
         };
         let expression = match projected {
           Some(i) => OrderExpression::Projection(i),
-          None => OrderExpression::Expression(compiler.compile(&item.expr, true, aggregate)?),
+          None => OrderExpression::Expression(
+            compiler.compile(&item.expr, CompileContext::projection(aggregate))?,
+          ),
         };
         order.push(Order {
           expression,
@@ -335,12 +337,7 @@ impl Plan {
         groups: &[],
         aggregates: &[],
       };
-      let args = self.temporal[i]
-        .args
-        .iter()
-        .map(|expr| expr.eval(&ctx))
-        .collect::<Result<Vec<_>>>()?;
-      self.temporal_values[i] = match self.temporal[i].advance(args) {
+      self.temporal_values[i] = match self.temporal[i].advance(&ctx) {
         Ok(value) => value,
         Err(Error::PendingRequestBudget) => {
           report.stop_reason = Some(StopReason::PendingRequestBudget);
@@ -489,7 +486,7 @@ impl Plan {
       report.stop_reason = Some(StopReason::GroupBudget);
     }
     for temporal in &self.temporal {
-      if let Some(deadline) = &temporal.deadline {
+      if let Some(deadline) = temporal.deadline() {
         report.pending_requests += deadline.pending();
         report.unresolved_due_to_unknown += deadline.invalidated;
         report.unmatched_responses += deadline.unmatched_responses;
