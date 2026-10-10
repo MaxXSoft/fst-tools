@@ -6,9 +6,39 @@ use crate::error::{Error, Result};
 use crate::sql::value::Cell;
 use std::collections::{BTreeMap, VecDeque};
 
+/// Known request IDs, with numeric equality independent of logic width.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Key {
+  Integer(i128),
+  Text(String),
+  WideBits(String),
+}
+
+impl Key {
+  fn from_cell(value: &Cell) -> Option<Self> {
+    match value {
+      Cell::Null => None,
+      Cell::Bool(value) => Some(Self::Integer(i128::from(*value))),
+      Cell::Integer(value) => Some(Self::Integer(*value)),
+      Cell::Text(value) => Some(Self::Text(value.clone())),
+      Cell::Bits(bits) if bits.bytes().all(|b| matches!(b, b'0' | b'1')) => {
+        let bits = bits.trim_start_matches('0');
+        Some(if bits.is_empty() {
+          Self::Integer(0)
+        } else {
+          i128::from_str_radix(bits, 2)
+            .map(Self::Integer)
+            .unwrap_or_else(|_| Self::WideBits(bits.into()))
+        })
+      }
+      Cell::Bits(_) => None,
+    }
+  }
+}
+
 #[derive(Debug)]
 pub(super) struct Deadline {
-  pending: BTreeMap<Cell, VecDeque<(u64, bool)>>,
+  pending: BTreeMap<Key, VecDeque<(u64, bool)>>,
   sample: u64,
   count: usize,
   limit: usize,
@@ -57,9 +87,10 @@ impl Deadline {
       .ok_or("timeouts sample counter overflow")?;
     let req = args[0].truth()?;
     let resp = args[1].truth()?;
-    let key = args.get(3).cloned().unwrap_or(Cell::Integer(0));
-    let key_unknown = matches!(key, Cell::Null | Cell::Bits(_));
-    if req.is_none() || resp.is_none() || (key_unknown && (req == Some(true) || resp == Some(true)))
+    let key = Key::from_cell(args.get(3).unwrap_or(&Cell::Integer(0)));
+    if req.is_none()
+      || resp.is_none()
+      || (key.is_none() && (req == Some(true) || resp == Some(true)))
     {
       self.invalidated += self.pending();
       self.pending.clear();
@@ -72,7 +103,7 @@ impl Deadline {
     if resp == Some(true) {
       let found = self
         .pending
-        .get_mut(&key)
+        .get_mut(key.as_ref().unwrap())
         .is_some_and(|q| q.pop_front().is_some());
       if found {
         self.count -= 1;
@@ -88,7 +119,7 @@ impl Deadline {
       }
       self
         .pending
-        .entry(key.clone())
+        .entry(key.unwrap())
         .or_default()
         .push_back((sample, false));
       self.count += 1;
@@ -169,5 +200,58 @@ mod tests {
     step(&mut d, true, false, 2, 0);
     assert_eq!(step(&mut d, true, true, 2, 0), Cell::Integer(0));
     assert_eq!(d.pending(), 1);
+  }
+
+  #[test]
+  fn keys_match_across_numeric_representations_and_leading_zeroes() {
+    let wide = "1".repeat(256);
+    for (request, response) in [
+      (Cell::Bits("0".repeat(128)), Cell::Integer(0)),
+      (
+        Cell::Bits(format!("{}1", "0".repeat(127))),
+        Cell::Bool(true),
+      ),
+      (Cell::Bool(true), Cell::Integer(1)),
+      (Cell::Bits(format!("000{wide}")), Cell::Bits(wide)),
+    ] {
+      let mut d = Deadline::new(4);
+      for (req, resp, key) in [(true, false, request), (false, true, response)] {
+        assert_eq!(
+          d.step(&[Cell::Bool(req), Cell::Bool(resp), Cell::Integer(1), key])
+            .unwrap(),
+          Cell::Integer(0)
+        );
+      }
+      assert_eq!(d.pending(), 0);
+      assert_eq!(d.invalidated, 0);
+      assert_eq!(d.unmatched_responses, 0);
+    }
+  }
+
+  #[test]
+  fn distinct_wide_and_text_keys_do_not_satisfy_other_requests() {
+    let wide = format!("1{}", "0".repeat(255));
+    for response in [Cell::Bits("1".repeat(256)), Cell::Text(wide.clone())] {
+      let mut d = Deadline::new(4);
+      d.step(&[
+        Cell::Bool(true),
+        Cell::Bool(false),
+        Cell::Integer(1),
+        Cell::Bits(wide.clone()),
+      ])
+      .unwrap();
+      assert_eq!(
+        d.step(&[
+          Cell::Bool(false),
+          Cell::Bool(true),
+          Cell::Integer(1),
+          response
+        ])
+        .unwrap(),
+        Cell::Integer(1)
+      );
+      assert_eq!(d.unmatched_responses, 1);
+      assert_eq!(d.invalidated, 0);
+    }
   }
 }
