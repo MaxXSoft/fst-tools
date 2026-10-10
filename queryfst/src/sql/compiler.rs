@@ -71,13 +71,6 @@ pub(super) struct Compiler<'a, 'ast> {
   temporal_keys: HashMap<CallKey<'ast>, usize>,
 }
 
-fn strip(expr: &A) -> &A {
-  match expr {
-    A::Nested(e) => strip(e),
-    _ => expr,
-  }
-}
-
 impl<'a, 'ast> Compiler<'a, 'ast> {
   pub(super) fn new(
     schema: &'a HashMap<String, (usize, u32)>,
@@ -483,6 +476,13 @@ fn sum(value: Expr) -> Aggregate {
     Aggregate::SumBit(*index, *bit as u32)
   } else {
     Aggregate::Sum(value)
+  }
+}
+
+fn strip(expr: &A) -> &A {
+  match expr {
+    A::Nested(e) => strip(e),
+    _ => expr,
   }
 }
 
