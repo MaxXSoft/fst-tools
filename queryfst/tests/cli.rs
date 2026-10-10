@@ -168,6 +168,73 @@ fn real_values_preserve_ieee_bits_without_decimal_rounding() {
 }
 
 #[test]
+fn vcd_events_preserve_occurrences_but_are_rejected_as_sampled_state() {
+  let dir = test_dir();
+  let path = dir.path().join("events.fst");
+  let mut writer = Writer::create(&path, true).unwrap();
+  let event = writer
+    .create_var(var_type::VCD_EVENT, var_dir::OUTPUT, 1, "ev", None)
+    .unwrap();
+  let state = writer
+    .create_var(var_type::VCD_WIRE, var_dir::OUTPUT, 1, "state", None)
+    .unwrap();
+  writer.emit_time_change(0).unwrap();
+  writer.emit_value_change(event, b"x").unwrap();
+  writer.emit_value_change(state, b"0").unwrap();
+  for time in [2, 7] {
+    writer.emit_time_change(time).unwrap();
+    writer.emit_value_change(event, b"1").unwrap();
+  }
+  writer.emit_time_change(10).unwrap();
+  drop(writer);
+
+  // Repeated event callbacks are occurrences even when their values are equal.
+  let records = run(&path, &["--signal", "ev", "--start", "1"]);
+  let events: Vec<_> = records
+    .iter()
+    .filter(|record| record["type"] == "event")
+    .map(|record| serde_json::json!([record["time"], record["value"]]))
+    .collect();
+  assert_eq!(
+    events,
+    vec![serde_json::json!(["2", "1"]), serde_json::json!(["7", "1"])]
+  );
+  assert_eq!(records.last().unwrap()["complete"], true);
+
+  // An unbound event must not prevent sampling ordinary logic in the same file.
+  let records = run(
+    &path,
+    &[
+      "--period",
+      "1",
+      "--sql",
+      "SELECT COUNT(*) FROM samples WHERE \"state\" = 0",
+    ],
+  );
+  let row = records
+    .iter()
+    .find(|record| record["type"] == "row")
+    .unwrap();
+  assert_eq!(row["values"], serde_json::json!(["11"]));
+  assert_eq!(records.last().unwrap()["complete"], true);
+
+  for args in [
+    vec!["--sql", "SELECT e FROM samples", "--bind", "e=ev"],
+    vec!["--sql", "SELECT \"ev\" FROM samples"],
+    vec!["--sql", "SELECT samples.\"ev\" FROM samples"],
+  ] {
+    let mut json_args = vec!["--json", "--period", "1"];
+    json_args.extend_from_slice(&args);
+    let output = invoke(&path, &json_args);
+    assert_eq!(output.status.code(), Some(1), "{args:?}");
+    assert!(output.stdout.is_empty(), "{args:?}");
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["code"], "query_error");
+    assert_eq!(error["message"], "binding ev is not fixed-width logic");
+  }
+}
+
+#[test]
 fn scalar_summary_accounts_elapsed_ticks_and_endpoint_transitions() {
   let dir = test_dir();
   let path = dir.path().join("input.fst");
