@@ -570,6 +570,41 @@ fn final_output_truncation_preserves_the_sampling_stop_reason() {
 }
 
 #[test]
+fn group_sort_budget_marks_rankings_provisional_after_a_complete_scan() {
+  let dir = directory();
+  fixture(dir.path());
+  let sql = "SELECT CASE WHEN tick=0 THEN 0 ELSE 1 END AS k, COUNT(*) AS n
+    FROM samples GROUP BY CASE WHEN tick=0 THEN 0 ELSE 1 END ORDER BY n DESC";
+  let top = run(dir.path(), &format!("{sql} LIMIT 1"), &[]);
+  assert_eq!(rows(&top), vec![json!(["1", "4"])]);
+
+  let buffered = run(
+    dir.path(),
+    &format!("{sql} LIMIT 1"),
+    &["--max-buffer-rows", "1"],
+  );
+  // The first encountered group is not the highest-ranked group. Its count is
+  // final, but treating this row as the final LIMIT result would be incorrect.
+  assert_eq!(rows(&buffered), vec![json!(["0", "1"])]);
+  let capped = run(dir.path(), sql, &["--max-rows", "1"]);
+  assert_eq!(rows(&capped), vec![json!(["1", "4"])]);
+
+  for (records, complete, truncated, reason) in [
+    (top, true, false, Value::Null),
+    (buffered, false, true, json!("buffer_budget")),
+    (capped, true, true, json!("row_budget_exhausted")),
+  ] {
+    let summary = records.last().unwrap();
+    assert_eq!(summary["complete"], complete);
+    assert_eq!(summary["aggregate_final"], complete);
+    assert_eq!(summary["scan_complete"], true);
+    assert_eq!(summary["unprocessed_input"], false);
+    assert_eq!(summary["output_truncated"], truncated);
+    assert_eq!(summary["reason"], reason);
+  }
+}
+
+#[test]
 fn normalized_group_expressions_preserve_labels_and_tree_structure() {
   let dir = directory();
   fixture(dir.path());

@@ -160,6 +160,7 @@ fn finish(
     "emitted_rows": rows.to_string(),
     "output_truncated": report.output_truncated || row_limit,
     "processed_through": report.processed_through.map(|n| n.to_string()),
+    // A conservative query-level guarantee, not per-group accumulator coverage.
     "aggregate_final": report.complete,
     "scan_complete": report.scan_complete,
     "unprocessed_input": !report.scan_complete,

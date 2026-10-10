@@ -408,6 +408,8 @@ impl Plan {
           .is_some_and(|limit| self.rows.len() >= limit)
         {
           report.stop_reason = Some(StopReason::BufferBudget);
+          // Dropping groups before sorting can change global rankings even if
+          // each group's aggregates already cover the entire sample window.
           report.complete = false;
           report.output_truncated = true;
           break;
