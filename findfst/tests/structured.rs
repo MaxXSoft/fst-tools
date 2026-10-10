@@ -299,10 +299,13 @@ fn json_errors_cover_parse_validation_input_and_output_failures() {
   assert_eq!(error["code"], "input_error");
   #[cfg(unix)]
   {
+    use std::net::Shutdown;
     use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixStream;
     use std::process::Stdio;
     let (output, receiver) = UnixStream::pair().unwrap();
+    // Make writes fail even if another process still holds a peer descriptor.
+    output.shutdown(Shutdown::Write).unwrap();
     drop(receiver);
     let output = Command::new(env!("CARGO_BIN_EXE_findfst"))
       .arg(&path)
