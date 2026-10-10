@@ -83,10 +83,11 @@ impl StopReason {
   }
 }
 
-/// Work/output status; partial aggregation describes only the observed prefix.
+/// Query evaluation, input coverage, and output-delivery status.
 #[derive(Clone, Debug, Default)]
 pub struct Report {
   pub columns: Vec<Column>,
+  /// Every requested sample was evaluated, independently of query completion.
   pub scan_complete: bool,
   pub pending_requests: u64,
   pub unresolved_due_to_unknown: u64,
@@ -97,6 +98,8 @@ pub struct Report {
   pub sampled_rows: u64,
   pub matched_rows: u64,
   pub emitted_rows: u64,
+  /// The query result is final, including global ordering. Output may be capped.
+  /// Work budgets can prevent completion even after all input was processed.
   pub complete: bool,
   pub output_truncated: bool,
   pub stop_reason: Option<StopReason>,

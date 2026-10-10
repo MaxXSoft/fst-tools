@@ -241,12 +241,29 @@ serialization are outside this duration budget. These limits do not cap process 
 widths, SQL expression sizes, or libfst's block buffers. Group/row limits bound
 cardinality, not allocated bytes.
 
-A final `summary` separates `complete`, `output_truncated`, `aggregate_final`,
-and `unprocessed_input`. A partial aggregate describes only observed samples,
-not the entire requested range. An absence of matches in a partial result does
-not establish an absence in the input. `processed_through` identifies observed
-sample coverage; callbacks at a budget-interrupted timestamp are not sampled
-until the entire timestamp is known. No continuation token is supplied.
+A final `summary` separates query completion from output truncation. In SQL mode:
+
+| Field | Meaning |
+| --- | --- |
+| `complete` | Query evaluation established the final result, including global ordering; output budgets may still omit rows. A finite SQL LIMIT or first-match query can complete before scanning the whole window. |
+| `scan_complete` | Every requested sample was evaluated. A full scan does not guarantee that subsequent result processing completed. |
+| `aggregate_final` | A conservative query-level finality guarantee, equal to `complete`, including for queries without aggregates. It does not independently describe each group's accumulator coverage or guarantee that every result row was emitted. |
+| `output_truncated` | Output was omitted by a budget. This alone does not tell whether the emitted rows form the correct prefix of the final sorted result. |
+| `unprocessed_input` | The inverse of `scan_complete`. |
+
+In particular, exhausting `--max-buffer-rows` while buffering groups for
+`ORDER BY` keeps `complete=false` and `aggregate_final=false`, with
+`output_truncated=true`. If scanning finished, `scan_complete` remains true and
+the emitted groups' aggregate values cover the full window, but omitted groups
+can change the global ranking and SQL LIMIT selection. This differs from an
+output row/byte cap applied after successful aggregation and sorting, which can
+leave `complete=true` and `aggregate_final=true` while truncating output.
+
+When scanning stops early, aggregates describe only observed samples. An absence
+of matches in a partial result does not establish an absence in the input.
+`processed_through` identifies observed sample coverage; callbacks at a
+budget-interrupted timestamp are not sampled until the entire timestamp is
+known. No continuation token is supplied.
 
 ## JSON Lines schema version 2
 
