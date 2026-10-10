@@ -79,6 +79,72 @@ fn coalesce_evaluates_only_through_the_first_nonnull_argument() {
 }
 
 #[test]
+fn left_shift_rejects_signed_value_overflow() {
+  let dir = dir();
+  let path = dir.path().join("shift-overflow.fst");
+  fixture(&path);
+  for expr in ["1<<127", "2<<127", "-2<<127", "(1<<126)<<1", "(-1<<127)<<1"] {
+    let output = invoke(&path, &format!("SELECT {expr} FROM samples LIMIT 1"), &[]);
+    assert_eq!(output.status.code(), Some(1), "{expr}");
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["code"], "query_error");
+    assert!(
+      error["message"]
+        .as_str()
+        .unwrap()
+        .contains("integer overflow")
+    );
+  }
+}
+
+#[test]
+fn shifts_preserve_signed_boundaries_zero_and_nulls() {
+  let dir = dir();
+  let path = dir.path().join("shift-boundaries.fst");
+  fixture(&path);
+  let output = invoke(
+    &path,
+    "SELECT 1<<126, -1<<127, -2<<126, 0<<127, -1<<0,
+       3>>1, -3>>1, (-1<<127)>>127, NULL<<1, 1>>NULL
+     FROM samples LIMIT 1",
+    &[],
+  );
+  assert_eq!(
+    rows(&output),
+    vec![json!([
+      "85070591730234615865843651857942052864",
+      i128::MIN.to_string(),
+      i128::MIN.to_string(),
+      "0",
+      "-1",
+      "1",
+      "-2",
+      "-1",
+      null,
+      null
+    ])]
+  );
+  for op in ["<<", ">>"] {
+    for count in ["-1", "128", "4294967296"] {
+      let output = invoke(
+        &path,
+        &format!("SELECT 1 {op} {count} FROM samples LIMIT 1"),
+        &[],
+      );
+      assert_eq!(output.status.code(), Some(1), "{op} {count}");
+      let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+      assert_eq!(error["code"], "query_error");
+      assert!(
+        error["message"]
+          .as_str()
+          .unwrap()
+          .contains("invalid binary operation")
+      );
+    }
+  }
+}
+
+#[test]
 fn null_text_comparisons_propagate_null_and_distinct_uses_equality_coercion() {
   let dir = dir();
   let path = dir.path().join("comparison.fst");

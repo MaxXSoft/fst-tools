@@ -161,7 +161,10 @@ fn eval_binary(op: &B, left: Cell, right: Cell) -> Result<Cell> {
     B::BitwiseAnd => Some(a & b),
     B::BitwiseOr => Some(a | b),
     B::BitwiseXor | B::PGBitwiseXor => Some(a ^ b),
-    B::PGBitwiseShiftLeft if (0..128).contains(&b) => a.checked_shl(b as u32),
+    B::PGBitwiseShiftLeft if (0..128).contains(&b) => {
+      // checked_shl validates only the count; also reject signed value overflow.
+      a.checked_shl(b as u32).filter(|value| (*value >> b) == a)
+    }
     B::PGBitwiseShiftRight if (0..128).contains(&b) => a.checked_shr(b as u32),
     _ => return Err(format!("unsupported or invalid binary operation {a} {op} {b}").into()),
   }
