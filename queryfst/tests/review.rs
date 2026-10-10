@@ -181,6 +181,60 @@ fn distinct_agrees_with_equality_for_known_wide_logic_that_fits_an_integer() {
 }
 
 #[test]
+fn timeouts_accept_known_wide_ids_and_still_invalidate_unknown_ids() {
+  let dir = dir();
+  let path = dir.path().join("wide-deadline.fst");
+  for bits in ["0".repeat(128), "1".repeat(128), "1".repeat(256)] {
+    let mut writer = Writer::create(&path, true).unwrap();
+    let a = writer
+      .create_var(
+        var_type::VCD_WIRE,
+        var_dir::OUTPUT,
+        bits.len() as u32,
+        "a",
+        None,
+      )
+      .unwrap();
+    writer.emit_time_change(0).unwrap();
+    writer.emit_value_change(a, bits.as_bytes()).unwrap();
+    writer.emit_time_change(3).unwrap();
+    writer
+      .emit_value_change(a, "x".repeat(bits.len()).as_bytes())
+      .unwrap();
+    writer.emit_time_change(5).unwrap();
+    drop(writer);
+    let output = invoke(
+      &path,
+      "SELECT tick, known(a), timeouts(tick=0,tick=2,2,a),
+         timeouts(tick=0,0,2,a), timeouts(tick=1,tick=3,4,a)
+       FROM samples",
+      &["--end", "4"],
+    );
+    assert_eq!(
+      rows(&output),
+      vec![
+        json!(["0", true, "0", "0", "0"]),
+        json!(["1", true, "0", "0", "0"]),
+        json!(["2", true, "0", "1", "0"]),
+        json!(["3", false, "0", "0", null]),
+        json!(["4", false, "0", "0", "0"]),
+      ],
+      "key {bits}"
+    );
+    let summary: Value = serde_json::from_str(
+      String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .last()
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(summary["unresolved_due_to_unknown"], "1");
+    assert_eq!(summary["pending_requests"], "0");
+    assert_eq!(summary["unmatched_responses"], "0");
+  }
+}
+
+#[test]
 fn recording_can_resume_at_the_first_sample_timestamp() {
   let dir = dir();
   let path = dir.path().join("resume-at-start.fst");

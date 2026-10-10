@@ -161,7 +161,10 @@ For a ready/valid bus, pass accepted handshakes to `timeouts`, not bare valid
 levels. The optional key pairs responses with the oldest pending request of the
 same key. A response on the deadline sample succeeds; a simultaneous request and
 response can complete immediately. At EOF, pending requests are unresolved, not
-reported as timeouts. Unknown handshake/key values invalidate pending evidence;
+reported as timeouts. Known logic keys support arbitrary widths and compare by
+unsigned value, ignoring leading zeroes; values fitting an integer also match
+equivalent integer/boolean keys. Text keys are compared exactly and remain
+distinct from numeric keys. Unknown handshake/key values invalidate pending evidence;
 the summary exposes that uncertainty. Pending request storage shares the
 `--max-buffer-rows` cardinality budget. Timed-out requests retain bounded FIFO
 placeholders until a response arrives, so a late response does not satisfy a
