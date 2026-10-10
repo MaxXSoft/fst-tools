@@ -333,6 +333,12 @@ impl Aggregate {
           Cell::Text(_) => value,
           _ => value.integer()?.map(Cell::Integer).unwrap_or(Cell::Null),
         };
+        if matches!(
+          (&value, &*state),
+          (Cell::Text(_), Cell::Integer(_)) | (Cell::Integer(_), Cell::Text(_))
+        ) {
+          return Err("MIN/MAX cannot mix text and numeric values within a group".into());
+        }
         if !matches!(value, Cell::Null)
           && (matches!(state, Cell::Null)
             || if matches!(self, Self::Min(_)) {

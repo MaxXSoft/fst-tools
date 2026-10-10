@@ -104,6 +104,12 @@ low bits without an error.
 Only fixed-width logic bindings are accepted in sampling mode. Event-query mode
 also supports real, EVCD and variable-length values.
 
+`MIN`/`MAX` compare numbers numerically or text lexicographically. Mixing text
+and numeric values within one aggregate group is an error. Booleans and known
+logic values that fit the signed 128-bit range are converted to integers;
+NULL and unknown logic values are ignored. An empty/all-unknown group returns
+NULL. Different groups may use different types.
+
 Four-state values remain available as bit strings. Unknown numeric operands
 propagate NULL, so WHERE accepts only definite true. `known(value)` distinguishes
 unknown/unobserved values; `raw(signal)` retains width and leading zeroes.

@@ -370,6 +370,62 @@ fn grouping_and_ordering_normalize_sql_equivalent_numeric_types() {
 }
 
 #[test]
+fn min_max_reject_mixed_text_numeric_values_in_either_order() {
+  let dir = directory();
+  fixture(dir.path());
+  for aggregate in ["MIN", "MAX"] {
+    for (first, later) in [("999", "'0'"), ("'0'", "999")] {
+      let sql = format!(
+        "SELECT {aggregate}(CASE WHEN tick=0 THEN NULL WHEN tick=1 THEN {first}
+           ELSE {later} END) FROM samples"
+      );
+      let output = invoke(dir.path(), &sql, &[]);
+      assert_eq!(output.status.code(), Some(1), "{sql}");
+      let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+      assert_eq!(error["code"], "query_error");
+      assert_eq!(
+        error["message"],
+        "MIN/MAX cannot mix text and numeric values within a group"
+      );
+    }
+  }
+}
+
+#[test]
+fn min_max_preserve_numeric_coercion_text_ordering_and_nulls_per_group() {
+  let dir = directory();
+  fixture(dir.path());
+  let records = run(
+    dir.path(),
+    "SELECT MIN(CASE WHEN tick=0 THEN NULL ELSE a END),
+       MAX(CASE WHEN tick=0 THEN NULL ELSE a END),
+       MIN(CASE WHEN tick<2 THEN NULL ELSE raw(a) END),
+       MAX(CASE WHEN tick<2 THEN NULL ELSE raw(a) END),
+       MIN(CASE WHEN tick=0 THEN true ELSE a END),
+       MAX(CASE WHEN tick=0 THEN true ELSE a END), MIN(unknown), MAX(unknown)
+     FROM samples",
+    &[],
+  );
+  assert_eq!(
+    rows(&records),
+    vec![json!([
+      "1", "4", "00000010", "00000100", "1", "4", null, null
+    ])]
+  );
+  let records = run(
+    dir.path(),
+    "SELECT b, MIN(CASE WHEN b=0 THEN a ELSE raw(a) END),
+       MAX(CASE WHEN b=0 THEN a ELSE raw(a) END)
+     FROM samples GROUP BY b ORDER BY b",
+    &[],
+  );
+  assert_eq!(
+    rows(&records),
+    vec![json!(["0", "0", "4"]), json!(["1", "00000001", "00000011"])]
+  );
+}
+
+#[test]
 fn scalar_dispatch_preserves_aliases_nulls_and_lazy_branches() {
   let dir = directory();
   fixture(dir.path());
