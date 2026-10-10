@@ -236,7 +236,7 @@ fn json_preserves_large_times_escaping_paths_aliases_and_attribute_boundaries() 
   writer
     .set_attr_begin(
       attr_type::MISC,
-      misc_type::COMMENT,
+      misc_type::COMMENT as _,
       "comment \"\\\n雪",
       u64::MAX,
     )
