@@ -52,6 +52,7 @@ pub(super) fn resolve(
         || matches!(
           var.ty(),
           fstapi::var_type::GEN_STRING
+            | fstapi::var_type::VCD_EVENT
             | fstapi::var_type::VCD_REAL
             | fstapi::var_type::VCD_REAL_PARAMETER
             | fstapi::var_type::VCD_REALTIME

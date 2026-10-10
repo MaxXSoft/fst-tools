@@ -95,10 +95,11 @@ SQL integers use checked signed 128-bit arithmetic. Known logic vectors are
 interpreted as unsigned values; signed RTL interpretation is not inferred.
 Integer division truncates toward zero. Arithmetic errors are explicit errors.
 Left shifts also fail when the result exceeds the signed 128-bit range. Both
-shift operators require a count in 0..127; right shifts sign-extend and discard
-low bits without an error.
-Only fixed-width logic bindings are accepted in sampling mode. Event-query mode
-also supports real, EVCD and variable-length values.
+shift operators require a count from 0 through 127; right shifts sign-extend and
+discard low bits without an error.
+Only fixed-width logic bindings, excluding named events, are accepted in sampling
+mode. Event-query mode also supports named events, real, EVCD and variable-length
+values.
 
 `MIN`/`MAX` compare numbers numerically or text lexicographically. Mixing text
 and numeric values within one aggregate group is an error. Booleans and known
