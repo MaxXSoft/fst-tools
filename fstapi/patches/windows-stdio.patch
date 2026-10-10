@@ -81,7 +81,7 @@
              *nam = fname;
 -            fh = unlink_fopen(fname, "w+b");
 +            /* Delete on close, and never inherit the handle into a child. */
-+            fh = unlink_fopen(fname, FST_OPEN_MODE("w+bD"));
++            fh = fopen(fname, FST_OPEN_MODE("w+bD"));
 +            if (fh) {
 +                /* The CRT owns deletion now; do not unlink a reused path later. */
 +                free(fname);

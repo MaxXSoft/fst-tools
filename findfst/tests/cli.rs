@@ -126,11 +126,14 @@ fn prints_string_values_without_reencoding_bytes() {
   // buffered data is small enough that only the final flush discovers it.
   #[cfg(unix)]
   for extra_args in [&[][..], &["--names-only"][..]] {
+    use std::net::Shutdown;
     use std::os::fd::OwnedFd;
     use std::os::unix::net::UnixStream;
     use std::process::Stdio;
 
     let (output, receiver) = UnixStream::pair().unwrap();
+    // Make writes fail even if another process still holds a peer descriptor.
+    output.shutdown(Shutdown::Write).unwrap();
     drop(receiver);
     let result = Command::new(env!("CARGO_BIN_EXE_findfst"))
       .arg(&path)

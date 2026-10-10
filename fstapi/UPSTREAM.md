@@ -62,6 +62,9 @@ without inheritable `tmpfile` handles. Gzip descriptors use `DuplicateHandle`
 with inheritance disabled before transferring ownership to `_open_osfhandle`;
 plain `_dup` can create an inheritable handle again. Setting handle flags after
 opening or duplicating would still race with concurrent process creation.
+Temporary files also retain the empty file reserved by `GetTempFileName` until
+`fopen` opens it. Unlinking that reservation first allows another concurrent
+writer to reuse the same name, causing sharing failures or scratch-file collisions.
 The VCD export adapter uses `N` for its output stream as well. The mmap paths
 remain unchanged.
 See Microsoft's [input `fflush` semantics](https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/fflush)

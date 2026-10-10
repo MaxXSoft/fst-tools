@@ -127,6 +127,46 @@ fn round_trip_compression_hierarchy_and_repack() {
 }
 
 #[test]
+fn concurrent_writers_keep_scratch_files_isolated() {
+  let start = std::sync::Barrier::new(8);
+  std::thread::scope(|scope| {
+    for worker in 0..8 {
+      let start = &start;
+      scope.spawn(move || {
+        let dir = TestDir::new();
+        let path = dir.path("concurrent.fst");
+        start.wait();
+        for iteration in 0..32 {
+          let value = format!("{:08b}", worker * 32 + iteration).into_bytes();
+          let mut writer = Writer::create(&path, true).unwrap();
+          let handle = writer
+            .create_var(var_type::VCD_REG, var_dir::OUTPUT, 8, "value", None)
+            .unwrap();
+          writer.emit_time_change(0).unwrap();
+          writer.emit_value_change(handle, &value).unwrap();
+          writer.emit_time_change(1).unwrap();
+          drop(writer);
+
+          let mut reader = Reader::open(&path).unwrap();
+          assert_eq!(reader.vars().next().unwrap().unwrap().0, "value");
+          reader.set_mask_all();
+          assert_eq!(
+            events(&mut reader),
+            vec![Event {
+              time: 0,
+              handle,
+              value,
+              variable_length: false,
+            }],
+            "worker {worker}, iteration {iteration}"
+          );
+        }
+      });
+    }
+  });
+}
+
+#[test]
 fn reading_values_does_not_require_a_prior_hierarchy_walk() {
   let dir = TestDir::new();
   let path = dir.path("no-hierarchy-walk.fst");
