@@ -1,7 +1,7 @@
 # findfst
 
-Find callback values in selected FST signals. Human-readable text remains the
-default: `#TIME NAME VALUE`, or one name per result with `--names-only`.
+Find callback values in selected FST signals. Human-readable text is the default
+output: `#TIME NAME VALUE`, or one name per result with `--names-only`.
 Without `--all-matches`, the first matching callback is returned **per physical
 handle**, not the first match globally. Aliases never duplicate results. Existing
 binary, hexadecimal, and byte-regex matching semantics are preserved.
@@ -84,8 +84,8 @@ payloads. Regex matching and text output use round-trip decimal text for finite
 values (`1.0000000000000002`, for example), `inf` / `-inf` for infinities, and
 `NaN(0x7ff8000000000042)` for NaNs with their exact bits. JSON match values always
 use `real_f64_le_hex`; the header's `real_matching` describes the regex input.
-This replaces libfst's rounded decimal callbacks. No lossy UTF-8 replacement is
-performed; an unexpected non-UTF-8 callback uses `bytes_hex`.
+No lossy UTF-8 replacement is performed; an unexpected non-UTF-8 callback uses
+`bytes_hex`.
 
 `summary.status` is `complete` or `partial`, and `execution_complete` indicates
 whether traversal finished normally. `output_truncated` is independent: a
@@ -108,7 +108,7 @@ the remaining work budget on later callbacks in the enclosing block.
 
 ## Output and work budgets
 
-All budgets are optional; the original unrestricted behavior remains the default.
+All budgets are optional; the unrestricted behavior remains the default.
 
 - `--max-rows N` limits emitted match records. Metadata and the summary do not
   count as match rows. Zero emits no matches.
@@ -145,10 +145,10 @@ large callback or serialized record can require substantial temporary memory.
 
 In JSON mode, failures produce one versioned `error` JSON object on **stderr**,
 with `code`, `message`, and `exit_code`. Codes are `invalid_arguments` (exit 2),
-`input_error`, `output_error`, or `encoding_error` (exit 1). Parse errors also use
-JSON when `--json` or a recognized JSON `--format` was explicitly requested.
-Argument-validation failures now consistently use exit 2; older invalid value
-patterns used exit 1. Help/version output remains ordinary CLI text.
+`input_error`, `output_error`, `encoding_error` or `internal_error` (exit 1).
+Parse errors also use JSON when `--json` or a recognized JSON `--format` was
+explicitly requested. Argument-validation failures always exit 2. Help/version
+output remains ordinary CLI text.
 
 Failure during decoding or output can leave a partial stdout stream. Check the
 process exit status and the final summary before accepting it. Stderr errors are
