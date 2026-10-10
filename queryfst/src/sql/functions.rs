@@ -68,14 +68,9 @@ pub(super) enum BuiltinFunction {
 /// One supported operation and every spelling that resolves to it.
 struct FunctionDescriptor {
   canonical_name: &'static str,
-  kind: BuiltinFunction,
   aliases: &'static [&'static str],
+  kind: BuiltinFunction,
 }
-
-use AggregateFunction as A;
-use BuiltinFunction::{Aggregate, Raw, Scalar, Temporal};
-use ScalarFunction as S;
-use TemporalFunction as T;
 
 // Keep the catalog in one place while giving already-canonical names a string
 // match fast path. A linear scan here regresses repeated temporal-call planning.
@@ -84,21 +79,24 @@ macro_rules! builtin_catalog {
     const BUILTINS: &[FunctionDescriptor] = &[
       $(FunctionDescriptor {
         canonical_name: $canonical,
-        kind: $kind$(($variant))?,
         aliases: &[$($alias),*],
+        kind: BuiltinFunction::$kind$(($variant))?,
       }),*
     ];
 
     fn lookup(name: &str) -> Option<BuiltinFunction> {
       match name {
-        $($canonical $(| $alias)* => Some($kind$(($variant))?),)*
+        $($canonical $(| $alias)* => Some(BuiltinFunction::$kind$(($variant))?),)*
         _ => None,
       }
     }
 
     fn aggregate_name(name: &str) -> bool {
       match name {
-        $($canonical $(| $alias)* => matches!($kind$(($variant))?, BuiltinFunction::Aggregate(_)),)*
+        $($canonical $(| $alias)* => matches!(
+          BuiltinFunction::$kind$(($variant))?,
+          BuiltinFunction::Aggregate(_),
+        ),)*
         _ => false,
       }
     }
@@ -106,7 +104,7 @@ macro_rules! builtin_catalog {
     impl BuiltinFunction {
       pub(super) fn canonical_name(self) -> &'static str {
         match self {
-          $($kind$(($variant))? => $canonical,)*
+          $(BuiltinFunction::$kind$(($variant))? => $canonical,)*
         }
       }
     }
@@ -121,22 +119,22 @@ macro_rules! builtin_catalog {
 }
 
 builtin_catalog! {
-  "count" => Aggregate(A::Count),
-  "sum" => Aggregate(A::Sum),
-  "min" => Aggregate(A::Min),
-  "max" => Aggregate(A::Max),
-  "coalesce" => Scalar(S::Coalesce),
-  "known" | "is_known" => Scalar(S::Known),
-  "abs" => Scalar(S::Abs),
-  "bit" => Scalar(S::Bit),
-  "hex" => Scalar(S::Hex),
+  "count" => Aggregate(AggregateFunction::Count),
+  "sum" => Aggregate(AggregateFunction::Sum),
+  "min" => Aggregate(AggregateFunction::Min),
+  "max" => Aggregate(AggregateFunction::Max),
+  "coalesce" => Scalar(ScalarFunction::Coalesce),
+  "known" | "is_known" => Scalar(ScalarFunction::Known),
+  "abs" => Scalar(ScalarFunction::Abs),
+  "bit" => Scalar(ScalarFunction::Bit),
+  "hex" => Scalar(ScalarFunction::Hex),
   "raw" => Raw,
-  "lag" => Temporal(T::Lag),
-  "changed" => Temporal(T::Changed),
-  "hold" => Temporal(T::Hold),
-  "run_length" => Temporal(T::RunLength),
-  "runs" => Temporal(T::Runs),
-  "timeouts" => Temporal(T::Timeouts),
+  "lag" => Temporal(TemporalFunction::Lag),
+  "changed" => Temporal(TemporalFunction::Changed),
+  "hold" => Temporal(TemporalFunction::Hold),
+  "run_length" => Temporal(TemporalFunction::RunLength),
+  "runs" => Temporal(TemporalFunction::Runs),
+  "timeouts" => Temporal(TemporalFunction::Timeouts),
 }
 
 /// Only single, unquoted names participate in builtin resolution. Case folding
