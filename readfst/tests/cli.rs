@@ -260,6 +260,7 @@ fn json_preserves_large_times_escaping_paths_aliases_and_attribute_boundaries() 
   assert_eq!(json["schema"], "readfst");
   assert_eq!(json["schema_version"], 1);
   assert_eq!(json["metadata"]["version"], "version \"quoted\" \\ path");
+  assert_eq!(json["metadata"]["file_type_code"], 0);
   assert_eq!(json["metadata"]["timescale_exponent"], -12);
   assert_eq!(json["metadata"]["timezero"], "-9007199254740993");
   assert_eq!(json["metadata"]["start_time"], "9007199254740995");
@@ -272,11 +273,15 @@ fn json_preserves_large_times_escaping_paths_aliases_and_attribute_boundaries() 
     serde_json::json!(["top.with.dot", "inner", signal])
   );
   assert_eq!(vars[0]["width"], 4);
+  assert_eq!(vars[0]["type_code"], 5);
+  assert_eq!(vars[0]["direction_code"], 2);
   assert_eq!(vars[0]["handle"], u32::from(handle));
   assert_eq!(vars[0]["is_alias"], false);
   assert!(vars[0]["alias_of"].is_null());
   assert_eq!(vars[1]["handle"], vars[0]["handle"]);
   assert_eq!(vars[1]["is_alias"], true);
+  assert_eq!(vars[1]["type_code"], 5);
+  assert_eq!(vars[1]["direction_code"], 1);
   assert_eq!(vars[1]["alias_of"], vars[0]["name"]);
   assert_eq!(vars[1]["canonical_name"], vars[0]["name"]);
   assert_eq!(
@@ -284,6 +289,7 @@ fn json_preserves_large_times_escaping_paths_aliases_and_attribute_boundaries() 
     serde_json::json!(["top.with.dot", "inner"])
   );
   assert_eq!(json["scopes"][1]["full_name"], "top.with.dot.inner");
+  assert_eq!(json["scopes"][1]["type_code"], 0);
   let attrs = json["attributes"].as_array().unwrap();
   assert!(attrs.iter().any(|attr| attr["event"] == "begin"
     && attr["data"]["name"] == "comment \"\\\n雪"
