@@ -1,7 +1,7 @@
 //! Versioned, lossless metadata and hierarchy output for machine consumers.
 
 use crate::{Cli, attrs::AttrInfo, metadata::Metadata, scopes::ScopeInfo, vars::VarInfo};
-use fstapi::{Handle, Hier, Reader, Result};
+use fstapi::{FileType, Handle, Hier, Reader, Result, ScopeType, VarDir, VarType};
 use serde::{Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -44,7 +44,7 @@ struct JsonMetadata {
   #[serde(flatten)]
   info: Metadata,
   timescale_exponent: i32,
-  file_type_code: u32,
+  file_type_code: FileType,
 }
 
 /// Each declaration retains its own path, including aliases sharing one handle.
@@ -58,8 +58,8 @@ struct JsonVariable {
   alias_of: Option<String>,
   canonical_name: String,
   is_alias: bool,
-  type_code: u32,
-  direction_code: u32,
+  type_code: VarType,
+  direction_code: VarDir,
 }
 
 /// Scope paths disambiguate repeated local names in different parents.
@@ -71,7 +71,7 @@ struct JsonScope {
   hierarchy_index: usize,
   full_name: String,
   path: Vec<String>,
-  type_code: u32,
+  type_code: ScopeType,
 }
 
 /// Preserve begin/end boundaries and hierarchy position without guessing owners.
