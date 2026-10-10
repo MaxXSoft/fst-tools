@@ -71,13 +71,9 @@ Sampling is explicit: `--period P --phase Q` selects ticks satisfying
 time, not to `--start`. All selected callbacks at a timestamp are applied before
 a sample at that timestamp. Constant signals are carried forward, and samples
 are generated even when no selected signal changes. This differs from counting
-callbacks or PC transitions. Periodic sampling assumes the caller knows the
+callbacks or signal edges. Periodic sampling assumes the caller knows the
 clock cadence; it does not infer edges, gated clocks, HDL delta cycles, or the
 meaning of retirement from signal names.
-
-For the Fuxi example, the measured contract was period 2, phase 0: settled
-low-phase snapshots before the next odd rising edge. That choice is specific to
-that simulation. Other testbenches may require a different period/phase.
 
 ### Supported SQL
 
@@ -181,7 +177,7 @@ newer request. The optional key applies to both channels on that sample; buses
 with different simultaneous request/response IDs need an appropriate extraction
 or separate per-ID queries.
 
-A UART with separate address/data handshakes can be queried with
+An AXI bus with separate address/data handshakes can be queried with
 `hold(awaddr, awvalid = 1 AND awready = 1)` in the data-channel predicate. Callers
 must choose a transaction model appropriate to their bus; this primitive does
 not infer AXI ordering or transaction IDs.
@@ -228,7 +224,6 @@ residency over an unobserved interval.
 Bytes are checked on whole records, reserving 2048 bytes for a final summary.
 No line is split. A large metadata record can itself consume the available
 budget; inspect `output_truncated` before assuming every signal/column was emitted.
-Token budgets and continuation are not implemented.
 
 SQL LIMIT is part of the query, whereas `--max-rows` is an output budget. Top-PC
 rankings and final aggregates need a complete window even if only one row is
@@ -262,8 +257,7 @@ leave `complete=true` and `aggregate_final=true` while truncating output.
 When scanning stops early, aggregates describe only observed samples. An absence
 of matches in a partial result does not establish an absence in the input.
 `processed_through` identifies observed sample coverage; callbacks at a
-budget-interrupted timestamp are not sampled until the entire timestamp is
-known. No continuation token is supplied.
+budget-interrupted timestamp are not sampled until the entire timestamp is known.
 
 ## JSON Lines schema version 2
 
@@ -280,16 +274,14 @@ Every stdout line is an object with a `type` field:
 Raw values use `bits`, `bytes_hex`, `real_f64_le_hex`, or `evcd` encodings.
 Native real callbacks preserve the exact eight IEEE-754 bytes in little-endian
 hex; strings preserve arbitrary bytes as hex. Handles/widths/schema identifiers
-remain JSON numbers. Version 2 adds explicit budgets and SQL result records;
-consumers of the previous JSON-only default must now pass `--format json`.
+remain JSON numbers. Version 2 adds explicit budgets and SQL result records.
 
 Argument/query errors produce a structured `error` on stderr in JSON mode and
 exit nonzero. A decoding/output failure may leave an unfinished stdout stream.
 Consumers must check both exit status and the final summary. Budget-limited
 queries exit successfully with explicit partial/truncated status.
 
-Run `cargo test -p queryfst` for generated waveform regressions. Large traces and
-experimental result tables remain outside the repository's tracked fixtures.
+Run `cargo test -p queryfst` for generated waveform regressions.
 
 ## SQL microbenchmarks
 
@@ -319,8 +311,7 @@ Keep the same Criterion output directory between runs. Across worktrees, set
 `CRITERION_HOME` to the same absolute directory under ignored `debug/`. Baselines
 compare saved measurements; they do not rerun the old executable. Use the same
 host, toolchain, build profile, workload definitions, and measurement settings,
-and avoid concurrent builds or tests while timing. Generate fresh baselines when
-switching from the former custom runner to Criterion.
+and avoid concurrent builds or tests while timing.
 
 Timing baselines do not check SQL results. The benchmark checks repeatability
 outside the timed closures, and a separate test exports fingerprints covering

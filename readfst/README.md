@@ -1,7 +1,7 @@
 # readfst
 
 Inspect FST metadata and hierarchy without decoding signal value changes.
-The default output is the existing CLI table format. Select the sections you
+The default output is a human-readable table format. Select the sections you
 need with `--metadata`, `--vars`, `--scopes`, or `--attrs`; `--all` selects all four.
 
 ```sh
@@ -95,5 +95,5 @@ Metadata-only output reads no hierarchy records. Other JSON requests walk the
 hierarchy once, even when selecting several sections, and retain selected records
 plus the canonical variable-name map in memory. No value-change records are
 decoded. Memory use therefore scales with hierarchy size, rather than waveform
-duration. JSON mode does not yet offer pagination or a streaming record format.
-Names must be valid UTF-8 as required by the current fstapi text API.
+duration. JSON mode builds the selected sections in memory; it does not stream
+records. Names must be valid UTF-8 as required by the fstapi text API.

@@ -44,8 +44,7 @@
   budgets with explicit completion and truncation status.
 * SQL sampling in `queryfst`: signal bindings, periodic snapshots, integer
   expressions, streaming aggregation, temporal predicates, and match context.
-* Callback, sample, group, buffer, byte, row, and cooperative duration budgets;
-  no token budget or continuation protocol.
+* Callback, sample, group, buffer, byte, row, and cooperative duration budgets.
 * Cooperative reader cancellation with normal C buffer cleanup, including
   callback panic/error paths, using a documented build-local libfst patch.
 * Versioned JSON metadata and hierarchy output in `readfst`, plus variable-name
