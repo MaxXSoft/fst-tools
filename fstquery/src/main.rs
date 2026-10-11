@@ -25,8 +25,22 @@ enum Matches {
 
 /// Inspect FST events or query periodically sampled state with a bounded SQL subset.
 #[derive(Parser)]
-#[command(author, version, about)]
-#[command(group(ArgGroup::new("selection").required(true).multiple(true).args(["signals", "signal", "sql", "sql_file"])))]
+#[command(
+  author,
+  version,
+  about,
+  help_template(
+    r#"
+{before-help}{name} {version} by {author-with-newline}
+{about-with-newline}
+{usage-heading} {usage}
+
+{all-args}{after-help}"#
+  )
+)]
+#[command(group(ArgGroup::new("selection").required(true).multiple(true).args([
+  "signals", "signal", "sql", "sql_file",
+])))]
 #[command(group(ArgGroup::new("sql_source").args(["sql", "sql_file"]).requires("period")))]
 #[command(group(ArgGroup::new("sampling").multiple(true).requires("sql_source").args([
   "bindings", "bind", "period", "phase", "max_samples", "max_groups", "max_buffer_rows",
