@@ -36,6 +36,7 @@ pub fn build(
   strip_attrs: bool,
 ) -> Result<Selection> {
   let mut scopes = Vec::new();
+  let mut full_name = String::new();
   let mut handles = HashMap::new();
   let mut has_variable_values = false;
   // Iterate over hierarchies of the input waveform.
@@ -55,9 +56,15 @@ pub fn build(
 
       Hier::Var(v) => {
         let name = v.name()?;
-        // If need to match signals, check if the current signal matches.
+        // Match the full dotted path, but keep the local name for the writer.
         if let Some(re) = &re {
-          if !re.is_match(name) {
+          full_name.clear();
+          for scope in &scopes {
+            full_name.push_str(&scope.name);
+            full_name.push('.');
+          }
+          full_name.push_str(name);
+          if !re.is_match(&full_name) {
             continue;
           }
           // Visit all unvisited scopes and write them to file.

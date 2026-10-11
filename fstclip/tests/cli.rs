@@ -63,6 +63,60 @@ impl Fixture {
     fixture
   }
 
+  fn nested() -> Self {
+    let fixture = Fixture::empty();
+    let mut writer = Writer::create(&fixture.input, true).unwrap();
+    writer
+      .set_scope(scope_type::VCD_MODULE, "top", "top")
+      .unwrap();
+    writer
+      .set_scope(scope_type::VCD_MODULE, "core", "core")
+      .unwrap();
+    let core_valid = writer
+      .create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "valid", None)
+      .unwrap();
+    let pc = writer
+      .create_var(var_type::VCD_REG, var_dir::OUTPUT, 8, "pc [7:0]", None)
+      .unwrap();
+    writer
+      .set_scope(scope_type::VCD_MODULE, "pipe", "pipe")
+      .unwrap();
+    let pipe_valid = writer
+      .create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "valid", None)
+      .unwrap();
+    writer.set_upscope();
+    writer.set_upscope();
+    writer
+      .set_scope(scope_type::VCD_MODULE, "cache", "cache")
+      .unwrap();
+    let cache_valid = writer
+      .create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "valid", None)
+      .unwrap();
+    writer
+      .create_var(
+        var_type::VCD_REG,
+        var_dir::OUTPUT,
+        1,
+        "core_valid_alias",
+        Some(core_valid),
+      )
+      .unwrap();
+    writer.set_upscope();
+    writer.set_upscope();
+    let root_valid = writer
+      .create_var(var_type::VCD_REG, var_dir::OUTPUT, 1, "valid", None)
+      .unwrap();
+    writer.emit_time_change(0).unwrap();
+    writer.emit_value_change(core_valid, b"1").unwrap();
+    writer.emit_value_change(pc, b"10101010").unwrap();
+    writer.emit_value_change(pipe_valid, b"0").unwrap();
+    writer.emit_value_change(cache_valid, b"0").unwrap();
+    writer.emit_value_change(root_valid, b"1").unwrap();
+    writer.emit_time_change(10).unwrap();
+    drop(writer);
+    fixture
+  }
+
   fn clip(&self, name: &str, args: &[&str]) -> PathBuf {
     let output = self.dir.path().join(name);
     let result = Command::new(env!("CARGO_BIN_EXE_fstclip"))
@@ -111,7 +165,7 @@ fn read_values(path: &Path) -> (Reader, BTreeMap<String, Vec<Value>>) {
 #[test]
 fn copies_real_values_as_native_doubles() {
   let fixture = Fixture::new();
-  let path = fixture.clip("real.fst", &["-S", "^real$"]);
+  let path = fixture.clip("real.fst", &["-S", r"^top\.real$"]);
   let (_, values) = read_values(&path);
   assert_eq!(
     values["top.real"],
@@ -126,7 +180,7 @@ fn copies_real_values_as_native_doubles() {
 #[test]
 fn copies_evcd_port_storage_width() {
   let fixture = Fixture::new();
-  let path = fixture.clip("port.fst", &["-S", "^port$"]);
+  let path = fixture.clip("port.fst", &["-S", r"^top\.port$"]);
   let (mut reader, values) = read_values(&path);
   assert_eq!(reader.vars().next().unwrap().unwrap().1.length(), 2);
   assert_eq!(
@@ -208,7 +262,7 @@ fn string_window_keeps_variable_length_initial_values() {
   let fixture = Fixture::new();
   let path = fixture.clip(
     "string.fst",
-    &["-S", "^string$", "--start", "5", "--end", "35"],
+    &["-S", r"^top\.string$", "--start", "5", "--end", "35"],
   );
   let (reader, values) = read_values(&path);
   assert_eq!((reader.start_time(), reader.end_time()), (0, 30));
@@ -223,7 +277,7 @@ fn unchanged_selected_vector_survives_a_quiet_window() {
   let fixture = Fixture::new();
   let path = fixture.clip(
     "quiet-vector.fst",
-    &["-S", "^vector$", "--start", "21", "--end", "25"],
+    &["-S", r"^top\.vector$", "--start", "21", "--end", "25"],
   );
   let (reader, values) = read_values(&path);
   assert_eq!((reader.start_time(), reader.end_time()), (0, 4));
@@ -248,7 +302,7 @@ fn alias_only_selection_keeps_its_value() {
   let fixture = Fixture::new();
   let path = fixture.clip(
     "alias.fst",
-    &["-S", "^alias$", "--start", "5", "--end", "15"],
+    &["-S", r"^top\.alias$", "--start", "5", "--end", "15"],
   );
   let (reader, values) = read_values(&path);
   assert_eq!((reader.var_count(), reader.alias_count()), (1, 0));
@@ -259,6 +313,112 @@ fn alias_only_selection_keeps_its_value() {
       (5, VECTORS[1].to_vec(), false)
     ]
   );
+}
+
+#[test]
+fn signal_filter_matches_full_paths_and_preserves_hierarchy() {
+  let fixture = Fixture::nested();
+  let cases = [
+    (r"^top\.core\.valid$", 2, vec![("top.core.valid", "1")]),
+    (r"^top\.cache\.valid$", 2, vec![("top.cache.valid", "0")]),
+    (
+      r"^top\.core\.pipe\.valid$",
+      3,
+      vec![("top.core.pipe.valid", "0")],
+    ),
+    (r"^valid$", 0, vec![("valid", "1")]),
+    (
+      r"valid$",
+      4,
+      vec![
+        ("top.core.valid", "1"),
+        ("top.core.pipe.valid", "0"),
+        ("top.cache.valid", "0"),
+        ("valid", "1"),
+      ],
+    ),
+    (
+      r"^top\.core\.pc( \[[^]]+\])?$",
+      2,
+      vec![("top.core.pc [7:0]", "10101010")],
+    ),
+    (
+      r"^top\.core\.",
+      3,
+      vec![
+        ("top.core.valid", "1"),
+        ("top.core.pc [7:0]", "10101010"),
+        ("top.core.pipe.valid", "0"),
+      ],
+    ),
+  ];
+  for (index, (pattern, scopes, expected)) in cases.into_iter().enumerate() {
+    let path = fixture.clip(&format!("paths-{index}.fst"), &["--signals", pattern]);
+    let (reader, values) = read_values(&path);
+    assert_eq!(reader.scope_count(), scopes, "{pattern}");
+    assert_eq!(reader.var_count(), expected.len() as u64, "{pattern}");
+    let expected = expected
+      .into_iter()
+      .map(|(name, value)| (name.to_owned(), vec![(0, value.as_bytes().to_vec(), false)]))
+      .collect();
+    assert_eq!(values, expected, "{pattern}");
+  }
+}
+
+#[test]
+fn signal_filter_matches_alias_paths_and_preserves_shared_handles() {
+  let fixture = Fixture::nested();
+  for (index, (pattern, expected, scopes)) in [
+    (
+      r"^top\.cache\.core_valid_alias$",
+      vec!["top.cache.core_valid_alias"],
+      2,
+    ),
+    (
+      r"^top\.(core\.valid|cache\.core_valid_alias)$",
+      vec!["top.core.valid", "top.cache.core_valid_alias"],
+      3,
+    ),
+  ]
+  .into_iter()
+  .enumerate()
+  {
+    let path = fixture.clip(&format!("alias-paths-{index}.fst"), &["-S", pattern]);
+    let (mut reader, values) = read_values(&path);
+    assert_eq!(reader.scope_count(), scopes, "{pattern}");
+    assert_eq!(reader.alias_count(), expected.len() as u64 - 1, "{pattern}");
+    let declarations: Vec<_> = reader.vars().map(|entry| entry.unwrap()).collect();
+    assert_eq!(
+      declarations
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>(),
+      expected,
+      "{pattern}"
+    );
+    let handle = declarations[0].1.handle();
+    assert!(declarations.iter().all(|(_, var)| var.handle() == handle));
+    assert_eq!(
+      values,
+      BTreeMap::from([(expected[0].to_owned(), vec![(0, b"1".to_vec(), false)])]),
+      "{pattern}"
+    );
+  }
+}
+
+#[test]
+fn signal_filter_does_not_fall_back_to_local_names() {
+  let fixture = Fixture::new();
+  for pattern in [r"^vector$", r"^Top\.vector$"] {
+    let result = Command::new(env!("CARGO_BIN_EXE_fstclip"))
+      .arg(&fixture.input)
+      .arg(fixture.dir.path().join("unmatched.fst"))
+      .args(["-S", pattern])
+      .output()
+      .unwrap();
+    assert_eq!(result.status.code(), Some(1), "{pattern}");
+    assert!(String::from_utf8_lossy(&result.stderr).contains("No matching signals!"));
+  }
 }
 
 #[test]
