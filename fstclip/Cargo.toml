@@ -1,6 +1,6 @@
 [package]
 name = "fstclip"
-version = "0.0.3"
+version = "0.1.0"
 authors = ["MaxXing <x@MaxXSoft.net>"]
 edition = "2024"
 description = "Clip from FST waveform."
@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 clap = { version = "4.5.50", features = ["derive"] }
-fstapi = { path = "../fstapi" }
+fstapi = { path = "../fstapi", version = "0.1.0" }
 regex = "1.12.2"
 same-file = "1.0.6"
 

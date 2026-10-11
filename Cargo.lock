@@ -353,7 +353,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "fstapi"
-version = "0.0.3"
+version = "0.1.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -364,7 +364,7 @@ dependencies = [
 
 [[package]]
 name = "fstclip"
-version = "0.0.3"
+version = "0.1.0"
 dependencies = [
  "clap",
  "fstapi",
@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "fstfind"
-version = "0.0.3"
+version = "0.1.0"
 dependencies = [
  "clap",
  "fstapi",
@@ -386,7 +386,7 @@ dependencies = [
 
 [[package]]
 name = "fstprobe"
-version = "0.0.3"
+version = "0.1.0"
 dependencies = [
  "clap",
  "fstapi",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "fstquery"
-version = "0.0.3"
+version = "0.1.0"
 dependencies = [
  "clap",
  "criterion",

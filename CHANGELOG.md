@@ -1,12 +1,17 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-10-11
 
 ### Changed
 
 * Rename `readfst` to `fstprobe`, `clipfst` to `fstclip`, `findfst` to `fstfind`,
   including package names, binaries, and JSON schema names. The old command names
   are no longer provided.
+* Make `--signals` consistently match full hierarchical signal paths: `fstclip`
+  no longer matches local names, and `fstfind` moves its short option from `-s`
+  to `-S`.
+* Rename the `fstprobe` variable table's `Length in Bits` header to
+  `Width in Bits`.
 * Make `fstquery` human-readable by default; use `--format json` or `--json`
   for its version 1 JSON Lines interface, including SQL results and resource budgets.
 * Replace the modified C snapshot with the official libfst submodule, initially
@@ -20,9 +25,12 @@
 
 * Prevent Windows child processes from inheriting FST and VCD file handles,
   which could leave temporary files behind or prevent repack output replacement.
+  Temporary-file reservations are kept until the file is opened, so a
+  concurrent writer cannot reuse the same scratch-file name.
 * Read repacked FST files and gzip hierarchies correctly with Windows MSVC, and
   remove hierarchy and unpacking scratch files after closing their handles.
-* Handle signed C enum types on Windows in attribute metadata regression tests.
+* Handle signed C enum types on Windows in attribute metadata tests and JSON
+  code fields.
 * Reject invalid writer operations without corrupting initial-value timestamps;
   preserve static initial values and initial variable-length values.
 * Keep hierarchy records valid as iteration advances, and resume callback panics
@@ -43,8 +51,9 @@
 
 ### Added
 
-* Structured `fstfind` output, exact time windows, and separate output/scanning
-  budgets with explicit completion and truncation status.
+* Structured `fstfind` output with lossless values, exact time windows, and
+  separate output/scanning budgets with explicit completion and truncation
+  status.
 * SQL sampling in `fstquery`: signal bindings, periodic snapshots, integer
   expressions, streaming aggregation, temporal predicates, and match context.
 * Callback, sample, group, buffer, byte, row, and cooperative duration budgets.
