@@ -5,8 +5,8 @@
 ### Changed
 
 * Rename `readfst` to `fstprobe`, `clipfst` to `fstclip`, `findfst` to `fstfind`,
-  and `queryfst` to `fstquery`, including package names, binaries, and JSON schema
-  names. The old command names are no longer provided.
+  including package names, binaries, and JSON schema names. The old command names
+  are no longer provided.
 * Make `fstquery` human-readable by default; use `--format json` or `--json`
   for its version 1 JSON Lines interface, including SQL results and resource budgets.
 * Replace the modified C snapshot with the official libfst submodule, initially

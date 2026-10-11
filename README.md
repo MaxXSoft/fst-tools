@@ -22,16 +22,9 @@ For more details, please see:
 * [`fstclip`](fstclip): tool for clipping from FST waveform.
 * [`fstquery`](fstquery): selected-signal event queries and SQL sampling, with temporal predicates, aggregation, context windows, and resource budgets.
 
-For scripts and agents, `fstprobe --format json -a trace.fst` returns versioned
-metadata and hierarchy data. Use `--signals REGEX` with `--vars` to narrow signal
-discovery, then `fstquery --format json` to inspect values without exporting a
-complete VCD. `fstfind --format json` provides structured value matches. Both
-tools default to human-readable output and distinguish incomplete scans from
-truncated output.
-See the [fstprobe JSON schema](fstprobe/README.md) and
-[fstquery query semantics](fstquery/README.md) for timestamp precision, aliases,
-initial values, recording gaps, output limits, and completion checks. See the
-[fstfind interface](fstfind/README.md) for value-search semantics.
+For scripts and agents, `fstprobe --format json -a trace.fst` returns versioned metadata and hierarchy data. Use `--signals REGEX` with `--vars` to narrow signal discovery, then `fstquery --format json` to inspect values without exporting a complete VCD. `fstfind --format json` provides structured value matches. Both tools default to human-readable output and distinguish incomplete scans from truncated output.
+
+See the [fstprobe JSON schema](fstprobe/README.md) and [fstquery query semantics](fstquery/README.md) for timestamp precision, aliases, initial values, recording gaps, output limits, and completion checks. See the [fstfind interface](fstfind/README.md) for value-search semantics.
 
 ## Building from Source
 
