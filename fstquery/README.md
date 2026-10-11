@@ -260,7 +260,10 @@ of matches in a partial result does not establish an absence in the input.
 `processed_through` identifies observed sample coverage; callbacks at a
 budget-interrupted timestamp are not sampled until the entire timestamp is known.
 
-## JSON Lines schema version 2
+## JSON Lines schema version 1
+
+Headers and structured errors identify the format with `schema: "fstquery"` and
+`schema_version: 1`.
 
 Every stdout line is an object with a `type` field:
 
@@ -274,8 +277,8 @@ Every stdout line is an object with a `type` field:
 
 Raw values use `bits`, `bytes_hex`, `real_f64_le_hex`, or `evcd` encodings.
 Native real callbacks preserve the exact eight IEEE-754 bytes in little-endian
-hex; strings preserve arbitrary bytes as hex. Handles/widths/schema identifiers
-remain JSON numbers. Version 2 adds explicit budgets and SQL result records.
+hex; strings preserve arbitrary bytes as hex. Handles, widths, and schema versions
+remain JSON numbers.
 
 Argument/query errors produce a structured `error` on stderr in JSON mode and
 exit nonzero. A decoding/output failure may leave an unfinished stdout stream.

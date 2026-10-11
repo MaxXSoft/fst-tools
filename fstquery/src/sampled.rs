@@ -65,7 +65,7 @@ fn header(reader: &Reader, options: &sql::Options) -> serde_json::Value {
   json!({
     "type": "header",
     "schema": "fstquery",
-    "schema_version": 2,
+    "schema_version": 1,
     "mode": "samples",
     "start": options.start.to_string(),
     "end": options.end.to_string(),

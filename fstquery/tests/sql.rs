@@ -96,6 +96,9 @@ fn complete_timestamp_alias_sampling_grouping_and_empty_aggregates() {
     "SELECT b, COUNT(*) AS n, SUM(a) AS total, MIN(a), MAX(a), SUM(a-alias) FROM samples GROUP BY b ORDER BY b",
     &[],
   );
+  assert_eq!(records[0]["type"], "header");
+  assert_eq!(records[0]["schema"], "fstquery");
+  assert_eq!(records[0]["schema_version"], 1);
   assert_eq!(
     rows(&records),
     vec![

@@ -148,7 +148,7 @@ fn report_error(json: bool, code: &str, message: &str, exit_code: i32) {
       "{}",
       serde_json::json!({
         "schema": "fstquery",
-        "schema_version": 2,
+        "schema_version": 1,
         "type": "error",
         "code": code,
         "message": message,

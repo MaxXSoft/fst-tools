@@ -8,7 +8,7 @@
   and `queryfst` to `fstquery`, including package names, binaries, and JSON schema
   names. The old command names are no longer provided.
 * Make `fstquery` human-readable by default; use `--format json` or `--json`
-  for its version 2 JSON Lines interface.
+  for its version 1 JSON Lines interface, including SQL results and resource budgets.
 * Replace the modified C snapshot with the official libfst submodule, initially
   pinned to `c716c1f67e21a06aaf8722830b371516e70dc657`. Keep Rust adaptation and
   VCD export glue separate from upstream; include the C sources in crate packages.

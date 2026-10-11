@@ -44,7 +44,11 @@ fn default_text_and_json_shortcut() {
   assert!(text.status.success());
   assert!(String::from_utf8_lossy(&text.stdout).starts_with("FST query:"));
   let json = invoke(&path, &["--signal", "a", "--json", "--limit", "1"]);
-  assert_eq!(records(&json).last().unwrap()["truncated"], true);
+  let result = records(&json);
+  assert_eq!(result[0]["type"], "header");
+  assert_eq!(result[0]["schema"], "fstquery");
+  assert_eq!(result[0]["schema_version"], 1);
+  assert_eq!(result.last().unwrap()["truncated"], true);
 }
 #[test]
 fn callback_budget_stops_backend_and_distinguishes_partial_from_truncated_output() {
@@ -102,10 +106,14 @@ fn structured_argument_and_execution_errors() {
   let output = invoke(Path::new("missing.fst"), &["--json"]);
   assert!(!output.status.success());
   let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+  assert_eq!(error["schema"], "fstquery");
+  assert_eq!(error["schema_version"], 1);
   assert_eq!(error["code"], "invalid_arguments");
   let output = invoke(Path::new("missing.fst"), &["--json", "--signal", "a"]);
   assert!(!output.status.success());
   let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+  assert_eq!(error["schema"], "fstquery");
+  assert_eq!(error["schema_version"], 1);
   assert_eq!(error["code"], "input_error");
 }
 

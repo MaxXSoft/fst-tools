@@ -322,7 +322,7 @@ fn write_header(
   output.record(&json!({
     "type": "header",
     "schema": "fstquery",
-    "schema_version": 2,
+    "schema_version": 1,
     "start": start.to_string(),
     "end": end.to_string(),
     "trace_start": reader.start_time().to_string(),
