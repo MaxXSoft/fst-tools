@@ -4,7 +4,10 @@
 
 ### Changed
 
-* Make `queryfst` human-readable by default; use `--format json` or `--json`
+* Rename `readfst` to `fstprobe`, `clipfst` to `fstclip`, `findfst` to `fstfind`,
+  and `queryfst` to `fstquery`, including package names, binaries, and JSON schema
+  names. The old command names are no longer provided.
+* Make `fstquery` human-readable by default; use `--format json` or `--json`
   for its version 2 JSON Lines interface.
 * Replace the modified C snapshot with the official libfst submodule, initially
   pinned to `c716c1f67e21a06aaf8722830b371516e70dc657`. Keep Rust adaptation and
@@ -27,29 +30,29 @@
 * Include value changes in VCD exports and report stream/close failures.
 * Preserve real, EVCD port, and string values when clipping, including initial
   values for windows with no internal changes, and preserve the input timezero.
-* Display SystemVerilog array scopes in `readfst`.
+* Display SystemVerilog array scopes in `fstprobe`.
 * Correct the pinned libfst's real-alias table overflow during opening/export and
   bound encoded writer sections before entering its 32-bit buffer arithmetic.
 * Reject clipping to the input file, including linked paths, before creating
   output; preserve changes at the clip boundary and dump activity intervals.
 * Preserve binary source attributes when clipping and display their decoded
-  indices in `readfst`; handle empty `--no-aliases` variable tables.
+  indices in `fstprobe`; handle empty `--no-aliases` variable tables.
 * Avoid unknown-state false matches in hexadecimal regex searches and preserve
-  raw string bytes in buffered `findfst` output, reporting output failures.
+  raw string bytes in buffered `fstfind` output, reporting output failures.
 * Skip earlier value blocks when clipping only fixed-width signals.
 
 ### Added
 
-* Structured `findfst` output, exact time windows, and separate output/scanning
+* Structured `fstfind` output, exact time windows, and separate output/scanning
   budgets with explicit completion and truncation status.
-* SQL sampling in `queryfst`: signal bindings, periodic snapshots, integer
+* SQL sampling in `fstquery`: signal bindings, periodic snapshots, integer
   expressions, streaming aggregation, temporal predicates, and match context.
 * Callback, sample, group, buffer, byte, row, and cooperative duration budgets.
 * Cooperative reader cancellation with normal C buffer cleanup, including
   callback panic/error paths, using a documented build-local libfst patch.
-* Versioned JSON metadata and hierarchy output in `readfst`, plus variable-name
+* Versioned JSON metadata and hierarchy output in `fstprobe`, plus variable-name
   regex filtering for both structured and existing text output.
-* `queryfst` for selected-signal JSONL queries with exact time bounds, initial
+* `fstquery` for selected-signal JSONL queries with exact time bounds, initial
   observations, alias metadata, explicit output truncation, lossless values,
   dump-activity information, and scalar state residency summaries.
 * Crate and command-line integration regressions.

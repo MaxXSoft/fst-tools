@@ -1,0 +1,23 @@
+[package]
+name = "fstquery"
+version = "0.0.3"
+authors = ["MaxXing <x@MaxXSoft.net>"]
+edition = "2024"
+description = "Query FST waveform events and sampled state with bounded SQL and JSON output."
+repository = "https://github.com/MaxXSoft/fst-tools"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+clap = { version = "4.5.50", features = ["derive"] }
+fstapi = { path = "../fstapi" }
+regex = "1.12.2"
+serde_json = "1.0"
+sqlparser = { version = "0.53", default-features = false, features = ["std", "visitor"] }
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+tempfile = "3.23.0"
+
+[[bench]]
+name = "sql_compile"
+harness = false

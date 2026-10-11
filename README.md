@@ -17,21 +17,21 @@ For more details, please see:
 
 ## Available Tools
 
-* [`readfst`](readfst): tool for displaying information about the contents of FST waveform, like `readelf`.
-* [`findfst`](findfst): tool for finding values of signals from FST waveform, like `fstminer` tool that comes with GTKWave but more powerful.
-* [`clipfst`](clipfst): tool for clipping from FST waveform.
-* [`queryfst`](queryfst): selected-signal event queries and SQL sampling, with temporal predicates, aggregation, context windows, and resource budgets.
+* [`fstprobe`](fstprobe): display metadata, hierarchy, variables, and attributes of FST waveforms.
+* [`fstfind`](fstfind): tool for finding values of signals from FST waveform, like `fstminer` tool that comes with GTKWave but more powerful.
+* [`fstclip`](fstclip): tool for clipping from FST waveform.
+* [`fstquery`](fstquery): selected-signal event queries and SQL sampling, with temporal predicates, aggregation, context windows, and resource budgets.
 
-For scripts and agents, `readfst --format json -a trace.fst` returns versioned
+For scripts and agents, `fstprobe --format json -a trace.fst` returns versioned
 metadata and hierarchy data. Use `--signals REGEX` with `--vars` to narrow signal
-discovery, then `queryfst --format json` to inspect values without exporting a
-complete VCD. `findfst --format json` provides structured value matches. Both
+discovery, then `fstquery --format json` to inspect values without exporting a
+complete VCD. `fstfind --format json` provides structured value matches. Both
 tools default to human-readable output and distinguish incomplete scans from
 truncated output.
-See the [readfst JSON schema](readfst/README.md) and
-[queryfst query semantics](queryfst/README.md) for timestamp precision, aliases,
+See the [fstprobe JSON schema](fstprobe/README.md) and
+[fstquery query semantics](fstquery/README.md) for timestamp precision, aliases,
 initial values, recording gaps, output limits, and completion checks. See the
-[findfst interface](findfst/README.md) for value-search semantics.
+[fstfind interface](fstfind/README.md) for value-search semantics.
 
 ## Building from Source
 
