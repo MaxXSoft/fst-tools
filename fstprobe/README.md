@@ -1,5 +1,9 @@
 # fstprobe
 
+[<img alt="github" src="https://img.shields.io/badge/github-MaxXSoft/fst--tools-8da0cb?style=for-the-badge&labelColor=555555&logo=github" height="20">](https://github.com/MaxXSoft/fst-tools)
+[<img alt="crates.io" src="https://img.shields.io/crates/v/fstprobe.svg?style=for-the-badge&color=fc8d62&logo=rust" height="20">](https://crates.io/crates/fstprobe)
+[<img alt="build status" src="https://img.shields.io/github/actions/workflow/status/MaxXSoft/fst-tools/build-test.yml?branch=master&style=for-the-badge" height="20">](https://github.com/MaxXSoft/fst-tools/actions?query=branch%3Amaster)
+
 Inspect FST metadata and hierarchy without decoding signal value changes.
 The default output is a human-readable table format. Select the sections you
 need with `--metadata`, `--vars`, `--scopes`, or `--attrs`; `--all` selects all four.

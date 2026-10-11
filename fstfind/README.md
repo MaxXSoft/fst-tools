@@ -1,5 +1,9 @@
 # fstfind
 
+[<img alt="github" src="https://img.shields.io/badge/github-MaxXSoft/fst--tools-8da0cb?style=for-the-badge&labelColor=555555&logo=github" height="20">](https://github.com/MaxXSoft/fst-tools)
+[<img alt="crates.io" src="https://img.shields.io/crates/v/fstfind.svg?style=for-the-badge&color=fc8d62&logo=rust" height="20">](https://crates.io/crates/fstfind)
+[<img alt="build status" src="https://img.shields.io/github/actions/workflow/status/MaxXSoft/fst-tools/build-test.yml?branch=master&style=for-the-badge" height="20">](https://github.com/MaxXSoft/fst-tools/actions?query=branch%3Amaster)
+
 Find callback values in selected FST signals. Human-readable text is the default
 output: `#TIME NAME VALUE`, or one name per result with `--names-only`.
 Without `--all-matches`, the first matching callback is returned **per physical
